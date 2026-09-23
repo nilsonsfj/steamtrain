@@ -709,6 +709,62 @@ describe("per-step (forEach) cost budget", () => {
   });
 });
 
+describe("a partially resumed fan-out", () => {
+  it("bills only the children it re-ran, not the ones replayed from the cache", async () => {
+    // First run: the $0.08 cap stops the fan-out after two $0.05 children, so
+    // the parent fails and only review[0] and review[1] land in the cache.
+    const deps = makeBillingDeps({ m1: { cost: 0.05, tokens: { input: 10 } } });
+    const cache = new Map<string, StepResult>();
+    const run = async (spec: WorkflowSpec) => {
+      const events: WorkflowEvent[] = [];
+      for await (const ev of runWorkflow(spec, { input: "go", cache }, deps)) events.push(ev);
+      return events;
+    };
+    const fanOut = (maxCostUsd: number): WorkflowSpec => ({
+      name: "fanout-resume",
+      phases: [
+        {
+          id: "split",
+          title: "split",
+          steps: [{ id: "targets", kind: "distributor", items: ["a", "b", "c"] }],
+        },
+        {
+          id: "process",
+          title: "process",
+          steps: [
+            {
+              id: "review",
+              kind: "processor",
+              agent: "claude",
+              model: "m1",
+              dependsOn: ["targets"],
+              forEach: "steps.targets.items",
+              maxCostUsd,
+              prompt: "review {{item}}",
+            },
+          ],
+        },
+      ],
+    });
+    await run(fanOut(0.08));
+
+    // The resume re-runs the parent: two children replay, one runs fresh.
+    const second = await run(fanOut(1));
+    const children = second.filter(
+      (e): e is Extract<WorkflowEvent, { kind: "step_done" }> =>
+        e.kind === "step_done" && e.stepId.startsWith("review["),
+    );
+    expect(children.filter((e) => e.cached).map((e) => e.stepId)).toEqual([
+      "review[0]",
+      "review[1]",
+    ]);
+    const done = second.at(-1) as Extract<WorkflowEvent, { kind: "workflow_done" }>;
+    expect(done.ok).toBe(true);
+    expect(costForResults(done.results)).toBeCloseTo(0.05, 10);
+    expect(totalTokens(tokensForResults(done.results))).toBe(10);
+  });
+});
+
 describe("aggregateCosts across history", () => {
   it("breaks spend down by workflow, step, and model", () => {
     const mkRecord = (

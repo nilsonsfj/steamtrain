@@ -1569,9 +1569,13 @@ async function runSingleStep(
     if (stepEdit) child.edited = true;
     outputs.set(child.stepId, child.output);
     results.set(child.stepId, child);
-    allResults.push(child);
+    // A child replayed from the cache on a partial resume billed nothing this
+    // run, as in the whole-step replay path above.
+    allResults.push(execution.cachedChildIds?.has(child.stepId) ? replayedSpend(child) : child);
     // Fan-out children hold the real cost; the parent's is their sum, so count
-    // children here and skip the parent below to avoid double-counting.
+    // children here and skip the parent below to avoid double-counting. A
+    // cached child's prior spend counts too: `costOfCachedResults` leaves
+    // cached children out of the budget seed, so this is its only count.
     env.spent.costUsd += child.costUsd ?? 0;
   }
   outputs.set(step.id, result.output);
@@ -1745,6 +1749,8 @@ interface ExecuteContext {
 interface ExecutionOutcome {
   result: StepResult;
   childResults?: StepResult[];
+  /** Fan-out children replayed from the cache this run (their spend is not this run's). */
+  cachedChildIds?: Set<string>;
   gate?: { passed: boolean; target?: string; onFalse?: "continue" | "fail" | "stop" };
   stop?: boolean;
 }
@@ -3193,6 +3199,7 @@ async function executeForEachStep(
     ts: Date.now(),
   });
 
+  const cachedChildIds = new Set<string>();
   const childResults: StepResult[] = values.map((_value, index) => ({
     stepId: `${step.id}[${index}]`,
     ok: false,
@@ -3269,6 +3276,7 @@ async function executeForEachStep(
         ts: Date.now(),
       });
 
+      if (cached) cachedChildIds.add(stepId);
       const result = cached
         ? { ...cached, stepId, parentStepId: step.id, item, iteration: ctx.iteration }
         : {
@@ -3330,6 +3338,7 @@ async function executeForEachStep(
         : {}),
     },
     childResults,
+    cachedChildIds,
   };
 }
 
@@ -3950,6 +3959,7 @@ async function executeWorkflowForEachStep(
     ts: Date.now(),
   });
 
+  const cachedChildIds = new Set<string>();
   const childResults: StepResult[] = values.map((_value, index) => ({
     stepId: `${step.id}[${index}]`,
     ok: false,
@@ -3978,6 +3988,7 @@ async function executeWorkflowForEachStep(
         ts: Date.now(),
       });
 
+      if (cached) cachedChildIds.add(childId);
       const result = cached
         ? { ...cached, stepId: childId, parentStepId: step.id, item, iteration: ctx.iteration }
         : {
@@ -4023,6 +4034,7 @@ async function executeWorkflowForEachStep(
       durationMs: Date.now() - started,
     },
     childResults,
+    cachedChildIds,
   };
 }
 
