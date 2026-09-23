@@ -1155,14 +1155,14 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<Drive
         : ok
           ? "done"
           : "error";
-    await publisher.finish(status, { ok: status === "done" });
+    await publisher.finish(status, { ok: status === "done", timedOut });
     const record = await saveHistory(historyStore, recorder, status, err);
     const outcome = record ? classifyRun(record, { timedOut }) : "canceled";
     return { code: exitCodeForOutcome(outcome), outcome, record };
   } catch (runErr) {
     const status: RunRecordStatus = ac.signal.aborted ? "canceled" : "error";
     const error = status === "error" ? message(runErr) : undefined;
-    await publisher.finish(status, { ok: false, error });
+    await publisher.finish(status, { ok: false, error, timedOut });
     const record = await saveHistory(historyStore, recorder, status, err, error);
     if (status === "canceled") {
       const outcome = record ? classifyRun(record, { timedOut }) : "canceled";
@@ -1285,7 +1285,11 @@ export async function runAttachCommand(
   }
 
   const final = (await store.get(runId)) ?? meta;
-  if (done) printHumanEvent(done, out, { canceled: final.status === "canceled" });
+  if (done) {
+    const timedOut = final.status === "canceled" && Boolean(final.timedOut);
+    printHumanEvent(done, out, { canceled: final.status === "canceled" && !timedOut, timedOut });
+    if (done.kind === "workflow_done") printRunSummary(done.results, out);
+  }
   if (json) {
     out(
       `${JSON.stringify({ type: "status", status: final.status, ok: final.ok, error: final.error })}\n`,

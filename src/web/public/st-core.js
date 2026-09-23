@@ -74,6 +74,8 @@ window.Steamtrain = (function () {
     // Server's view of the finished run's worktrees for the arrival page
     // ({ runId, sources, harvest } | { runId, pending } | { runId, failed }).
     arrivalWorktrees: null,
+    // Run id the arrival page's "status frame never came" fallback timer is armed for.
+    arrivalWorktreesWait: null,
     rafQueued: false, draftAbort: null, doctor: [], apiDoctor: [], doctorReadAt: 0,
     // Reported by /api/doctor: the PATH the server searched, and where it came
     // from. Explains "absent" runners; see buildPathDetail in st-settings.js.

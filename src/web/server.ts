@@ -2766,6 +2766,7 @@ function streamExternalRun(runId: string, store: LiveRunStore, res: ServerRespon
             status: meta?.status ?? "error",
             ok: meta?.ok,
             error: meta?.error ?? (meta ? undefined : "unknown run"),
+            timedOut: meta?.timedOut,
           })}\n\n`,
         );
       }

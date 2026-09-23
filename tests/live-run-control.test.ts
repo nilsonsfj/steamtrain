@@ -231,3 +231,17 @@ async function waitFor(
     await sleep(10);
   }
 }
+
+describe("live-run publisher: a timeout is not a person's cancel", () => {
+  it("records timedOut beside the canceled status, and only when it was one", async () => {
+    const store = createLiveRunStore(tempStoreDir());
+    await store.create(meta("r1"));
+    await store.create(meta("r2"));
+
+    await createLiveRunPublisher(store, "r1").finish("canceled", { ok: false, timedOut: true });
+    await createLiveRunPublisher(store, "r2").finish("canceled", { ok: false, timedOut: false });
+
+    expect(await store.get("r1")).toMatchObject({ status: "canceled", timedOut: true });
+    expect((await store.get("r2"))?.timedOut).toBeUndefined();
+  });
+});

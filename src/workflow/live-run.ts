@@ -42,7 +42,10 @@ export interface LiveRunPublisher {
    */
   flush(): Promise<void>;
   /** Flush buffered events, then write the terminal meta. */
-  finish(status: RunRecordStatus, opts?: { ok?: boolean; error?: string }): Promise<void>;
+  finish(
+    status: RunRecordStatus,
+    opts?: { ok?: boolean; error?: string; timedOut?: boolean },
+  ): Promise<void>;
 }
 
 const PUBLISH_FLUSH_MS = 25;
@@ -231,6 +234,7 @@ export function createLiveRunPublisher(store: LiveRunStore, runId: string): Live
             status,
             ok: opts.ok,
             error: opts.error,
+            timedOut: opts.timedOut || undefined,
             endedAt: Date.now(),
             heartbeatAt: Date.now(),
             pendingApprovals: [],

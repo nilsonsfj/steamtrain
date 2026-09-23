@@ -135,6 +135,11 @@ export interface LiveRunMeta {
   status: LiveRunStatus;
   ok?: boolean;
   error?: string;
+  /**
+   * Set on a canceled run that its whole-workflow timeout stopped, not a
+   * person: the record says "canceled" for both, the reader needs to know.
+   */
+  timedOut?: boolean;
   /** When the run entered the queue (registry arrival order → queue order). */
   createdAt: number;
   /** When the run left the queue and started executing. */
@@ -878,6 +883,7 @@ async function readMeta(path: string): Promise<LiveRunMeta | undefined> {
     status: m.status as LiveRunStatus,
     ok: typeof m.ok === "boolean" ? m.ok : undefined,
     error: typeof m.error === "string" ? m.error : undefined,
+    timedOut: m.timedOut === true ? true : undefined,
     createdAt: m.createdAt,
     startedAt: typeof m.startedAt === "number" ? m.startedAt : undefined,
     endedAt: typeof m.endedAt === "number" ? m.endedAt : undefined,

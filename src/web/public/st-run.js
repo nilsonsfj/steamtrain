@@ -1838,6 +1838,7 @@
     // failed run is not "complete" just because it stopped.
     var ended = done ? ({
       canceled: { cls: "stopped", text: "canceled" },
+      "timed-out": { cls: "failed", text: "timed out" },
       error: { cls: "failed", text: "failed" },
       "budget-exceeded": { cls: "failed", text: "budget reached" }
     })[S.runStatus] || { cls: "complete", text: "complete" } : null;
@@ -2097,12 +2098,14 @@
           if (ST.instruments) ST.instruments.stopThroughput();
           S.queuedBanner = false;
           S.endedAt = Date.now();
-          S.runStatus = frame.status || null;
+          // The record says "canceled" for a timeout too; the frame says which.
+          S.runStatus = frame.status === "canceled" && frame.timedOut ? "timed-out" : frame.status || null;
           // Only outcomes the arrival page cannot state for itself get a
           // banner. "Run failed." / "Run complete." said nothing the page's own
           // status pill and root-cause block do not say better, and stacking
           // them put two verdicts above one run.
-          if (frame.status === "canceled") setBanner("Run canceled.", "info");
+          if (S.runStatus === "timed-out") setBanner("Run stopped: it reached its workflow timeout.", "err");
+          else if (frame.status === "canceled") setBanner("Run canceled.", "info");
           else if (frame.status === "budget-exceeded") setBanner("Run stopped: cost budget reached. Raise maxCostUsd and re-run to resume.", "err");
           else setBanner("", "");
           S.arrivalEnter = true;

@@ -179,7 +179,7 @@ describe("finished-run page: a canceled run is not a failed one", () => {
   it("keeps the run's own terminal status and states it", () => {
     // The steps alone cannot tell: a canceled run's interrupted step reads as
     // a failure, so the page called a Cancel click "FAILED" and blamed a step.
-    expect(runJs).toContain("S.runStatus = frame.status || null;");
+    expect(runJs).toContain(": frame.status || null;");
     expect(js).toContain(
       'if (S.runStatus === "canceled") return { text: "canceled", cls: " stopped" };',
     );
@@ -211,5 +211,19 @@ describe("finished-run page: a canceled run is not a failed one", () => {
     // away from a running run left no way back but the Runs page.
     expect(shellJs).toContain('return run.id !== S.runId || liveRunState(run).cls === "awaiting";');
     expect(runJs).toContain('text: "attach"');
+  });
+
+  it("tells a workflow timeout apart from a cancel", () => {
+    // The record says "canceled" for both; the status frame carries timedOut.
+    expect(runJs).toContain('frame.status === "canceled" && frame.timedOut ? "timed-out"');
+    expect(js).toContain(
+      'if (S.runStatus === "timed-out") return { text: "timed out", cls: " failed" };',
+    );
+  });
+
+  it("re-arms the worktree fallback when the reader comes back to the run", () => {
+    // A marker that outlived its timer left the page at "checking…" for good.
+    expect(js).toContain("if (S.arrivalWorktreesWait === runId) S.arrivalWorktreesWait = null;");
+    expect(coreJs).toContain("arrivalWorktreesWait: null");
   });
 });

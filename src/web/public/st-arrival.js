@@ -114,10 +114,12 @@
     if (!runId) return;
     if (!S.runStatus && !force) {
       // Should the status frame never come, look anyway after a while rather
-      // than sit at "checking…" for good.
-      if (!S.arrivalWorktreesWait || S.arrivalWorktreesWait !== runId) {
+      // than sit at "checking…" for good. The marker is cleared whatever the
+      // timer finds, so returning to this run later re-arms it.
+      if (S.arrivalWorktreesWait !== runId) {
         S.arrivalWorktreesWait = runId;
         setTimeout(function () {
+          if (S.arrivalWorktreesWait === runId) S.arrivalWorktreesWait = null;
           var have = S.arrivalWorktrees && S.arrivalWorktrees.runId === runId;
           if (S.runId === runId && !have) loadArrivalWorktrees(runId, true);
         }, 8000);
@@ -456,6 +458,7 @@
    */
   function arrivalState(report) {
     if (S.runStatus === "canceled") return { text: "canceled", cls: " stopped" };
+    if (S.runStatus === "timed-out") return { text: "timed out", cls: " failed" };
     if (S.runStatus === "budget-exceeded") return { text: "budget reached", cls: " failed" };
     if (S.runStatus === "error") return { text: "failed", cls: " failed" };
     // The final status frame lands just after the last event: until then a
