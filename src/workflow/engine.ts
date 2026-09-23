@@ -564,6 +564,39 @@ function killInFlightStep(env: RunEnv, stepId: string, by?: string): StepKillRes
 }
 
 /**
+ * Stamped on a not-ok result whose failure was settled while the run was still
+ * live: the agent exited, the command returned non-zero, the call errored, all
+ * before any abort. When a cancel lands in the moment after that (during
+ * retries, workspace checks, cleanup), the step still failed on its own, and
+ * the run-abort pass in runStep must not relabel it as interrupted and hide it
+ * from failure counts and root cause.
+ *
+ * A symbol so it rides along through the `{ ...result }` copies the executors
+ * make, and never reaches the cache, the event stream or history (JSON drops
+ * it).
+ */
+const settledFailure = Symbol("settledFailure");
+
+type SettledMark = { [settledFailure]?: true };
+
+/** Marks a not-ok result as having failed before the run was aborted. */
+function markSettledFailure(result: StepResult): StepResult {
+  if (!result.ok) (result as SettledMark)[settledFailure] = true;
+  return result;
+}
+
+/** Drops the mark, for a step the abort cut short after an earlier failure. */
+function clearSettledFailure(result: StepResult): StepResult {
+  delete (result as SettledMark)[settledFailure];
+  return result;
+}
+
+/** True when {@link markSettledFailure} stamped this result. */
+export function failedBeforeAbort(result: StepResult): boolean {
+  return (result as SettledMark)[settledFailure] === true;
+}
+
+/**
  * Record a kill on the step's result, in place.
  *
  * Two things this deliberately does NOT do:
@@ -1574,7 +1607,11 @@ async function runSingleStep(
   if (env.signal?.aborted) {
     for (const r of [execution.result, ...(execution.childResults ?? [])]) {
       // A budget placeholder (`notRun`) never started, so nothing was cut short.
-      if (!r.ok && !r.killed && !r.dependencyFailed && !r.notRun) r.interrupted = true;
+      if (r.ok || r.killed || r.dependencyFailed || r.notRun) continue;
+      // A failure that settled before the abort is the step's own, whatever
+      // the run did next.
+      if (failedBeforeAbort(r)) continue;
+      r.interrupted = true;
     }
   }
 
@@ -2151,35 +2188,38 @@ async function runAgentAttempt(
     processTimedOut,
   });
 
+  const attemptResult: StepResult = {
+    stepId,
+    ok,
+    output,
+    item,
+    error: ok ? undefined : (errorMessage ?? (cancelled ? "cancelled" : "failed")),
+    durationMs: Date.now() - started,
+    costUsd,
+    tokens,
+    sessionId,
+    permissions: permissions.plan
+      ? {
+          profile: permissions.plan.profile,
+          enforcement: permissions.plan.enforcement,
+          gaps: permissions.plan.gaps.length > 0 ? permissions.plan.gaps : undefined,
+        }
+      : undefined,
+    // Carry-over fix: record the RENDERED model that actually ran (`step`
+    // here already carries block 5's templated-then-rendered value — see
+    // `executeAgentStep`'s `step` reassignment and the merge conflict
+    // resolver's synthetic step) so cost analytics (`cost.ts`'s
+    // `resultLeaves`/`recordLeaves`) attribute spend to what was billed
+    // instead of falling back to the raw `{{inputs.*}}` spec string. `llm`
+    // steps already set this on their own result path; this is the
+    // worker/processor/agent-backed-distributor/consolidator/merge-conflict
+    // counterpart.
+    model: step.model,
+  };
+  // The agent's exit was read before any abort, so its failure is its own.
+  if (!cancelled) markSettledFailure(attemptResult);
   return {
-    result: {
-      stepId,
-      ok,
-      output,
-      item,
-      error: ok ? undefined : (errorMessage ?? (cancelled ? "cancelled" : "failed")),
-      durationMs: Date.now() - started,
-      costUsd,
-      tokens,
-      sessionId,
-      permissions: permissions.plan
-        ? {
-            profile: permissions.plan.profile,
-            enforcement: permissions.plan.enforcement,
-            gaps: permissions.plan.gaps.length > 0 ? permissions.plan.gaps : undefined,
-          }
-        : undefined,
-      // Carry-over fix: record the RENDERED model that actually ran (`step`
-      // here already carries block 5's templated-then-rendered value — see
-      // `executeAgentStep`'s `step` reassignment and the merge conflict
-      // resolver's synthetic step) so cost analytics (`cost.ts`'s
-      // `resultLeaves`/`recordLeaves`) attribute spend to what was billed
-      // instead of falling back to the raw `{{inputs.*}}` spec string. `llm`
-      // steps already set this on their own result path; this is the
-      // worker/processor/agent-backed-distributor/consolidator/merge-conflict
-      // counterpart.
-      model: step.model,
-    },
+    result: attemptResult,
     retryable,
     failureKind,
     classicRetryable,
@@ -2685,9 +2725,15 @@ async function executeAgentStep(
       await abortableSleep(delayMs, ctx.signal);
       // A cancel during the backoff wait ends the step now — don't start another
       // attempt (which would spawn the agent again).
+      // The earlier attempt's failure is not the step's verdict: it had
+      // another try left, and the cancel took it.
       if (ctx.signal?.aborted) {
         return attachWorktreeInfo(
-          { ...result, attempts: attempt, durationMs: Date.now() - firstStarted },
+          clearSettledFailure({
+            ...result,
+            attempts: attempt,
+            durationMs: Date.now() - firstStarted,
+          }),
           workspace,
           stepCwd,
         );
@@ -2797,13 +2843,15 @@ async function verifyReadOnlyWorkspace(
   if (violations.length === 0) return { ...result, permissions: record };
 
   const message = `permission violation: read-only step '${stepId}' modified its workspace (${violations.length} path(s): ${describeViolations(violations)})`;
-  return {
+  // Only reached when the run was live at the check, so the violation is the
+  // step's own failure.
+  return markSettledFailure({
     ...result,
     ok: false,
     error: result.ok ? message : `${result.error} · ${message}`,
     output: result.ok ? message : result.output,
     permissions: record,
-  };
+  });
 }
 
 /**
@@ -3485,6 +3533,8 @@ async function executeCommandStep(
       exitCode: run.exitCode,
       durationMs: Date.now() - started,
     };
+    // The command ended on its own (non-zero exit, timeout, failed spawn).
+    if (!run.cancelled) markSettledFailure(result);
     if (result.ok && step.output) {
       const parsed = parseStructuredOutput(result.output, step.output);
       // No "fix your JSON" retry here — the command is deterministic, so a
@@ -3617,19 +3667,21 @@ async function runLlmAttempt(
   // Reached when cancelled OR the call failed; a cancel wins the label even
   // if the (raced) call happened to complete.
   const error = !outcome.ok && !cancelled ? outcome.error : "cancelled";
+  const failed: StepResult = {
+    stepId,
+    ok: false,
+    output: error,
+    item,
+    error,
+    durationMs: Date.now() - started,
+    costUsd: outcome.ok ? llmCostUsd(settings.pricing, outcome.tokens) : undefined,
+    tokens: outcome.ok ? outcome.tokens : undefined,
+    api: settings.api,
+    model: settings.model,
+  };
+  if (!cancelled) markSettledFailure(failed);
   return {
-    result: {
-      stepId,
-      ok: false,
-      output: error,
-      item,
-      error,
-      durationMs: Date.now() - started,
-      costUsd: outcome.ok ? llmCostUsd(settings.pricing, outcome.tokens) : undefined,
-      tokens: outcome.ok ? outcome.tokens : undefined,
-      api: settings.api,
-      model: settings.model,
-    },
+    result: failed,
     // A cancelled step is never retried (and never cached, so resume re-runs it).
     retryable: !cancelled && !outcome.ok && outcome.retryable,
   };

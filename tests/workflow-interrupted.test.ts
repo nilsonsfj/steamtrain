@@ -42,3 +42,73 @@ describe("a step taken down by a canceled run", () => {
     expect(events.some((e) => e.kind === "step_done" && e.stepId === "next")).toBe(false);
   });
 });
+
+describe("a step that failed on its own just before the cancel", () => {
+  it("keeps its failure, while the sibling the cancel cut short is interrupted", async () => {
+    process.env.STEAMTRAIN_TEST_LLM_KEY = "sk-test";
+    const spec: WorkflowSpec = {
+      name: "race",
+      phases: [
+        {
+          id: "list",
+          title: "List",
+          steps: [{ id: "items", kind: "command", cmd: "printf 'fails\\nslow\\n'" }],
+        },
+        {
+          id: "work",
+          title: "Work",
+          steps: [
+            {
+              id: "each",
+              kind: "llm",
+              model: "claude-opus-4-8",
+              apiKeyEnv: "STEAMTRAIN_TEST_LLM_KEY",
+              dependsOn: ["items"],
+              forEach: "steps.items.items",
+              prompt: "{{item}}",
+            },
+          ],
+        },
+      ],
+    };
+    const ac = new AbortController();
+    const events: WorkflowEvent[] = [];
+    try {
+      for await (const ev of runWorkflow(
+        spec,
+        { input: "task" },
+        {
+          createAdapter: () => {
+            throw new Error("no agents");
+          },
+          maxConcurrency: 2,
+          cwd: process.cwd(),
+          llmComplete: async (req) => {
+            if (req.prompt.includes("fails")) {
+              // The real failure lands first; the cancel follows while the
+              // sibling is still running, so the fan-out settles after it.
+              setTimeout(() => ac.abort(), 50);
+              return { ok: false, error: "HTTP 400: bad request", retryable: false };
+            }
+            await new Promise((resolve) => req.signal?.addEventListener("abort", resolve));
+            return { ok: false, error: "aborted", retryable: false };
+          },
+        },
+        ac.signal,
+      )) {
+        events.push(ev);
+      }
+    } finally {
+      process.env.STEAMTRAIN_TEST_LLM_KEY = undefined;
+    }
+    const done = events.find((e) => e.kind === "workflow_done");
+    const results = done?.kind === "workflow_done" ? done.results : [];
+    const parent = results.find((r) => r.stepId === "each");
+    const children = parent?.childResults ?? results.filter((r) => r.parentStepId === "each");
+    const failed = children.find((r) => r.output.includes("bad request"));
+    const cut = children.find((r) => r !== failed);
+    expect(failed).toMatchObject({ ok: false, error: "HTTP 400: bad request" });
+    expect(failed?.interrupted).toBeUndefined();
+    expect(cut).toMatchObject({ ok: false, interrupted: true });
+  });
+});
