@@ -47,6 +47,7 @@ import {
   formatTokenSummary,
   formatTokens,
   formatUsd,
+  hasFailingGate,
   hashWorkflowSpec,
   headlessApprovalProvider,
   headlessHumanInputProvider,
@@ -1267,12 +1268,14 @@ export async function runAttachCommand(
       if (event.kind === "step_start" && !event.parentStepId) {
         stepMeta.set(event.stepId, { agent: event.agent, api: event.api, model: event.model });
       }
+      // Kept in JSON mode too: the exit code falls back to its results.
+      if (event.kind === "workflow_done") done = event;
       if (json) out(`${JSON.stringify(event)}\n`);
-      else if (event.kind === "workflow_done") done = event;
+      // Human mode prints workflow_done below, once the final status is known.
       // Steps the cancel took down carry `interrupted`, which is what keeps
       // their why-line quiet. A run-wide cancel flag would also silence a
       // step that genuinely failed before the cancel when attaching late.
-      else printHumanEvent(event, out);
+      else if (event.kind !== "workflow_done") printHumanEvent(event, out);
       if (!json && event.kind === "approval_pending") {
         out(`     decide with: steamtrain workflow approve ${runId} --step ${event.stepId}\n`);
       }
@@ -1293,7 +1296,7 @@ export async function runAttachCommand(
 
   const final = (await store.get(runId)) ?? meta;
   const timedOut = final.status === "canceled" && Boolean(final.timedOut);
-  if (done) {
+  if (done && !json) {
     printHumanEvent(done, out, { canceled: final.status === "canceled" && !timedOut, timedOut });
     if (done.kind === "workflow_done") printRunSummary(done.results, out, stepMeta);
   }
@@ -1322,7 +1325,13 @@ export async function runAttachCommand(
   if (timedOut) return exitCodeForOutcome("timeout");
   if (final.status === "budget-exceeded") return exitCodeForOutcome("budget-exceeded");
   if (final.status === "canceled") return exitCodeForOutcome("canceled");
-  return final.status === "done" && final.ok !== false ? 0 : 1;
+  if (final.status === "done" && final.ok !== false) return 0;
+  // A failed run with no record: its final results still carry the gate
+  // outcomes, which is what tells a gate failure (2) from a step failure (1).
+  if (done?.kind === "workflow_done" && hasFailingGate(done.results)) {
+    return exitCodeForOutcome("gate-failed");
+  }
+  return exitCodeForOutcome("step-failed");
 }
 
 // ── workflow runs (list) ─────────────────────────────────────────────────────

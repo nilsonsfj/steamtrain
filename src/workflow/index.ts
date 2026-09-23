@@ -639,6 +639,7 @@ export {
   classifyRun,
   exitCodeForOutcome,
   exitCodeForRun,
+  hasFailingGate,
   isReportFormat,
   renderReport,
 } from "./report";

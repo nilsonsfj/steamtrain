@@ -105,10 +105,19 @@ export function exitCodeForRun(record: RunRecord, opts: ClassifyRunOptions = {})
  * is what stopped the run.
  */
 function hasGateFailure(record: RunRecord): boolean {
-  for (const phase of record.phases) {
-    for (const step of phase.steps) {
-      if (step.gate && step.gate.passed === false && step.gate.onFalse === "fail") return true;
-    }
+  return record.phases.some((phase) => hasFailingGate(phase.steps));
+}
+
+/**
+ * The same gate test over bare step results, for a caller that holds a run's
+ * `workflow_done` results but no saved record (`workflow attach` when the
+ * record never lands).
+ */
+export function hasFailingGate(
+  steps: Iterable<{ gate?: { passed: boolean; onFalse?: string } }>,
+): boolean {
+  for (const step of steps) {
+    if (step.gate && step.gate.passed === false && step.gate.onFalse === "fail") return true;
   }
   return false;
 }
