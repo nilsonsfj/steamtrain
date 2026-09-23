@@ -171,11 +171,18 @@
     // Only steps that are actually running. Listing every configured agent as
     // "idle" burned the rail on runners the workflow never mentions; the
     // instrument title is "in flight", so idle rows stay out.
-    flattenSteps().forEach(function (s) {
-      if (s.status !== "running") return;
+    var steps = flattenSteps();
+    // A fan-out parent is running while its children are; they are the runners.
+    var parents = {};
+    steps.forEach(function (s) { if (s.parentStepId) parents[s.parentStepId] = true; });
+    steps.forEach(function (s) {
+      if (s.status !== "running" || parents[s.stepId]) return;
+      // Something has to be running it: a gate, an approval waiting on a
+      // person or an agentless merge is not a runner, and read as "agent".
+      if (!s.agent && !s.api && s.blockKind !== "command") return;
       list.appendChild(h("div", { class: "runner busy" },
         h("span", { class: "dot" }),
-        h("span", { class: "name", text: agentLabel(s.agent) }),
+        h("span", { class: "name", text: s.agent ? agentLabel(s.agent) : s.api || "command" }),
         h("span", { class: "model", text: s.model || "" }),
         h("span", {
           class: "right",

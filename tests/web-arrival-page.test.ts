@@ -63,7 +63,7 @@ describe("finished-run page: run actions are not workflow actions", () => {
 
 describe("finished-run page: the page ends in an action", () => {
   it("offers a retry that restarts from the failing step, not from the top", () => {
-    expect(js).toContain('"Retry from " + root.stepId');
+    expect(js).toContain('(resume ? "Resume from " : "Retry from ") + root.stepId');
     // retry-failed seeds the steps that already succeeded and re-executes the
     // rest; "rerun" would start the whole workflow over.
     expect(js).toContain('ST.modals.rerunHistory(S.runId, S.selected, "retry")');
@@ -170,5 +170,60 @@ describe("finished-run page: layout", () => {
 
   it("retires the live instrument rail once the run is over", () => {
     expect(ruleBody(css, "body.arrival-mode #rail-right")).toMatch(/display:\s*none/);
+  });
+});
+
+describe("finished-run page: a canceled run is not a failed one", () => {
+  const shellJs = readFileSync(join(PUBLIC_DIR, "st-shell.js"), "utf8");
+
+  it("keeps the run's own terminal status and states it", () => {
+    // The steps alone cannot tell: a canceled run's interrupted step reads as
+    // a failure, so the page called a Cancel click "FAILED" and blamed a step.
+    expect(runJs).toContain(": frame.status || null;");
+    expect(js).toContain(
+      'if (S.runStatus === "canceled") return { text: "canceled", cls: " stopped" };',
+    );
+    expect(runJs).toContain('canceled: { cls: "stopped", text: "canceled" }');
+  });
+
+  it("says where the run was stopped instead of naming a root cause", () => {
+    expect(js).toContain("function isInterrupted(s)");
+    // The engine's explicit marker decides, not the error's wording.
+    expect(js).toContain("if (r.interrupted) return true;");
+    expect(js).toContain('"Run canceled while "');
+    expect(js).toContain('"interrupted — run canceled"');
+    expect(ruleBody(css, ".rootcause.interrupted")).toContain("border-left-color");
+  });
+
+  it("lists the ledger in the order steps ran, so a loop's later pass is not last", () => {
+    expect(js).toMatch(/function collectArrivalLeafSteps[\s\S]{0,900}startedAt/);
+  });
+
+  it("reports worktrees from the server's look at them, not from step success", () => {
+    // "5 merged back" on a workflow with no merge step: an ok step merged nothing.
+    expect(js).toContain('"/api/history/" + encodeURIComponent(runId) + "/worktrees"');
+    expect(js).not.toContain('s.status === "done" && s.result && s.result.ok) merged');
+    expect(js).toContain('" with changes "');
+  });
+
+  it("never loses a live run from view once the cockpit leaves it", () => {
+    // Only detached or approval-blocked runs used to be listed, so clicking
+    // away from a running run left no way back but the Runs page.
+    expect(shellJs).toContain('return run.id !== S.runId || liveRunState(run).cls === "awaiting";');
+    expect(runJs).toContain('text: "attach"');
+  });
+
+  it("tells a workflow timeout apart from a cancel", () => {
+    // The record says "canceled" for both; the status frame carries timedOut.
+    expect(runJs).toContain('frame.status === "canceled" && frame.timedOut ? "timed-out"');
+    expect(js).toContain(
+      'if (S.runStatus === "timed-out") return { text: "timed out", cls: " failed" };',
+    );
+  });
+
+  it("re-arms the worktree fallback when the reader comes back to the run", () => {
+    // A marker that outlived its timer left the page at "checking…" for good.
+    expect(js).toContain("if (S.arrivalWorktreesWait === runId) S.arrivalWorktreesWait = null;");
+    expect(coreJs).toContain("arrivalWorktreesWait: null");
   });
 });

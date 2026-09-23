@@ -138,4 +138,37 @@ describe("web plan and sidebar UI contracts", () => {
       "bundled-one 1·1",
     ]);
   });
+
+  it("labels a timed-out recent run as timed out, not canceled", () => {
+    const foot = node("div");
+    const elements: Record<string, StubNode> = { wflist: node("div"), railFoot: foot };
+    const run = (id: string, status: string, timedOut?: boolean) => ({
+      id,
+      status,
+      timedOut,
+      startedAt: 0,
+      input: "",
+    });
+    const ST: Record<string, unknown> = {
+      state: {
+        selected: "w",
+        liveRuns: [],
+        recentRuns: [run("aaaaa1", "canceled", true), run("bbbbb2", "canceled")],
+      },
+      h: node,
+      clear: (target: StubNode) => {
+        target.children = [];
+      },
+      truncate: (text: string) => text,
+      relTime: () => "now",
+    };
+    const document = { getElementById: (id: string) => elements[id] ?? null };
+
+    new Function("window", "document", shellJs)({ Steamtrain: ST }, document);
+    (ST.shell as { renderLiveRuns: () => void }).renderLiveRuns();
+
+    const rows = foot.children.map((child) => flatText(child));
+    expect(rows).toContain("aaaaa · now · timed out");
+    expect(rows).toContain("bbbbb · now · canceled");
+  });
 });

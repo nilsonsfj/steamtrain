@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { homeRelativePath } from "../paths";
+import { describeIssue } from "../util/zod-issue";
 import { mergeWorkflowMap } from "../workflow/catalog";
 import { WORKSPACE_CONFIG_FILENAME } from "../workspace";
 import { DEFAULT_CONFIG } from "./defaults";
@@ -140,7 +141,7 @@ function loadUserConfigFile(path: string): {
     return {
       config: DEFAULT_CONFIG,
       exists: true,
-      warning: `invalid ${path}: ${issue ? `${issue.path.join(".") || "config"}: ${issue.message}` : "schema error"}`,
+      warning: `invalid ${path}: ${describeIssue(issue)}`,
     };
   }
 
@@ -169,7 +170,7 @@ function loadConfigFile(path: string, scope: ConfigScope, base: SteamtrainConfig
       scope,
       warning: joinWarnings(
         legacyTasks,
-        `invalid ${path}: ${result.error.issues[0]?.message ?? "schema error"}`,
+        `invalid ${path}: ${describeIssue(result.error.issues[0])}`,
       ),
     };
   }

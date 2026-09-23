@@ -177,6 +177,7 @@ export {
   type CostAnalytics,
   emptyTokens,
   isEmptyTokens,
+  addSpend,
   addTokens,
   addTokensInto,
   totalTokens,

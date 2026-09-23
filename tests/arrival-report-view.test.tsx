@@ -14,6 +14,7 @@ function report(ok = true): ArrivalReport {
       failCount: ok ? 0 : 1,
       skipCount: 1,
       blockedCount: 0,
+      interruptedCount: 0,
       costUsd: 0,
       tokens: 0,
       agentless: true,

@@ -37,7 +37,11 @@
   var fmtTokens = ST.fmtTokens;
   var stepPermissions = ST.stepPermissions;
 
-  /** Leaf results only (fan-out parents are represented by their children). */
+  /**
+   * Leaf results only (fan-out parents are represented by their children), in
+   * the order they ran. A loop appends its later passes after the phases that
+   * follow it, so phase order would list pass 2 after the run's last step.
+   */
   function collectArrivalLeafSteps() {
     var out = [];
     (S.runState.phases || []).forEach(function (p) {
@@ -45,7 +49,28 @@
         if (s.result && !(s.result.childResults && s.result.childResults.length)) out.push(s);
       });
     });
-    return out;
+    return out
+      .map(function (s, i) { return { s: s, i: i }; })
+      .sort(function (a, b) {
+        var ta = typeof a.s.startedAt === "number" ? a.s.startedAt : Infinity;
+        var tb = typeof b.s.startedAt === "number" ? b.s.startedAt : Infinity;
+        return ta === tb ? a.i - b.i : ta - tb;
+      })
+      .map(function (e) { return e.s; });
+  }
+
+  /**
+   * A step that stopped only because the run was canceled around it. It did
+   * not fail, and blaming it would send the reader to fix a step that is fine.
+   * The engine marks these `interrupted`; records from before that marker only
+   * carry its "cancelled" label, so that is still matched on a canceled run.
+   */
+  function isInterrupted(s) {
+    var r = s && s.result;
+    if (!r || r.ok) return false;
+    if (r.interrupted) return true;
+    return (S.runStatus === "canceled" || S.runStatus === "timed-out") &&
+      /cancel|abort|timed out|SIGTERM/i.test(r.error || "");
   }
 
   /**
@@ -79,21 +104,129 @@
   }
 
   /**
-   * Distinct worktrees this run touched, split into merged back (their owning
-   * step finished ok) vs left behind (the step errored, so nothing merged
-   * its work). The client has no direct "was this branch merged" signal, so
-   * this uses the owning step's own outcome as the closest available proxy.
+   * What became of this run's worktrees, from the server's own look at them —
+   * the client cannot tell by itself: a step that finished ok merged nothing,
+   * and a run that changed nothing has its worktrees reclaimed as it ends.
+   * Fetched once per run, after its terminal status frame: the record is
+   * written around then (by another process, for a detached run), so a miss
+   * is retried for a while before giving up.
    */
-  function computeWorktreeStats(leaves) {
-    var seen = {};
-    var merged = 0, left = 0;
-    leaves.forEach(function (s) {
-      if (!s.worktree || !s.worktree.branch || seen[s.worktree.branch]) return;
-      seen[s.worktree.branch] = true;
-      if (s.status === "done" && s.result && s.result.ok) merged += 1;
-      else left += 1;
+  function loadArrivalWorktrees(runId, force) {
+    if (!runId) return;
+    if (!S.runStatus && !force) {
+      // Should the status frame never come, look anyway after a while rather
+      // than sit at "checking…" for good. The marker is cleared whatever the
+      // timer finds, so returning to this run later re-arms it.
+      if (S.arrivalWorktreesWait !== runId) {
+        S.arrivalWorktreesWait = runId;
+        setTimeout(function () {
+          if (S.arrivalWorktreesWait === runId) S.arrivalWorktreesWait = null;
+          var have = S.arrivalWorktrees && S.arrivalWorktrees.runId === runId;
+          if (S.runId === runId && !have) loadArrivalWorktrees(runId, true);
+        }, 8000);
+      }
+      return;
+    }
+    // A fetch that gave up gets one more try when the run's status arrives
+    // (the forced fallback's `force` is that second chance too).
+    var prev = S.arrivalWorktrees && S.arrivalWorktrees.runId === runId ? S.arrivalWorktrees : null;
+    if (prev && !(prev.failed && !prev.retried)) return;
+    var entry = { runId: runId, pending: true, retried: Boolean(prev) };
+    S.arrivalWorktrees = entry;
+    var giveUp = function () {
+      if (S.arrivalWorktrees !== entry) return;
+      S.arrivalWorktrees = { runId: runId, failed: true, retried: entry.retried };
+      ST.render();
+    };
+    // A 404 (record not written yet), a 5xx or a dropped request are all
+    // worth another try; anything else (auth, a bad id) will not change.
+    var attempt = function (left) {
+      var again = function () {
+        if (S.arrivalWorktrees !== entry) return;
+        if (left > 0) setTimeout(function () { attempt(left - 1); }, 1000);
+        else giveUp();
+      };
+      ST.apiAuth("GET", "/api/history/" + encodeURIComponent(runId) + "/worktrees").then(function (r) {
+        if (S.arrivalWorktrees !== entry) return;
+        if (r.status === 404 || r.status >= 500) { again(); return; }
+        if (r.status !== 200) { giveUp(); return; }
+        S.arrivalWorktrees = { runId: runId, sources: r.body.sources || [], harvest: r.body.harvest || null };
+        ST.render();
+      }).catch(function (err) {
+        // apiAuth has already asked the viewer to sign in again; retrying
+        // would only raise that prompt ten more times.
+        if (err && err.message === "auth required") giveUp();
+        else again();
+      });
+    };
+    attempt(10);
+  }
+
+  /** Step ids an in-run `merge` step landed (its `from` sources, when it succeeded). */
+  function mergedInRun() {
+    var spec = (ST.run && ST.run.effectiveSpec && ST.run.effectiveSpec()) || S.spec;
+    var from = {};
+    ((spec && spec.phases) || []).forEach(function (p) {
+      (p.steps || []).forEach(function (st) {
+        if (st.kind === "merge" && Array.isArray(st.from)) from[st.id] = st.from;
+      });
     });
-    return { merged: merged, left: left };
+    var merged = {};
+    (S.runState.phases || []).forEach(function (p) {
+      (p.steps || []).forEach(function (s) {
+        if (from[s.stepId] && s.result && s.result.ok) from[s.stepId].forEach(function (id) { merged[id] = true; });
+      });
+    });
+    return merged;
+  }
+
+  /**
+   * Distinct worktrees this run left, by what is in them now: work nobody
+   * merged yet, work that was merged back, clean ones, and ones already
+   * cleaned up. Null until the server has answered.
+   */
+  function computeWorktreeStats() {
+    var wt = S.arrivalWorktrees;
+    if (!wt || wt.runId !== S.runId || !wt.sources) return null;
+    var merged = mergedInRun();
+    ((wt.harvest && wt.harvest.appliedSteps) || []).forEach(function (id) { merged[id] = true; });
+    var byRoot = {};
+    wt.sources.forEach(function (src) {
+      var key = src.root || src.branch || src.stepId;
+      var prev = byRoot[key];
+      byRoot[key] = {
+        merged: Boolean((prev && prev.merged) || merged[src.stepId]),
+        exists: src.exists,
+        changed: src.exists && src.files && src.files.length > 0
+      };
+    });
+    var stats = { changed: 0, merged: 0, clean: 0, gone: 0 };
+    Object.keys(byRoot).forEach(function (k) {
+      var t = byRoot[k];
+      if (t.merged) stats.merged += 1;
+      else if (!t.exists) stats.gone += 1;
+      else if (t.changed) stats.changed += 1;
+      else stats.clean += 1;
+    });
+    return stats;
+  }
+
+  function plural(n, word) {
+    return n + " " + word + (n === 1 ? "" : "s");
+  }
+
+  /** The ledger footer's line: every bucket that is not empty. */
+  function worktreeFootText(stats) {
+    if (!stats) {
+      var wt = S.arrivalWorktrees;
+      return wt && wt.failed ? "unknown" : "checking…";
+    }
+    var bits = [];
+    if (stats.changed) bits.push(stats.changed + " with changes");
+    if (stats.merged) bits.push(stats.merged + " merged back");
+    if (stats.clean) bits.push(stats.clean + " clean");
+    if (stats.gone) bits.push(stats.gone + " cleaned up");
+    return bits.length ? bits.join(" · ") : "none";
   }
 
   /** Total retry attempts across the run, plus which step ids were retried. */
@@ -203,10 +336,11 @@
     var actions = h("div", { class: "arrival-actions" });
     var primary = null;
     if (!isReadOnly() && root && S.runId) {
+      var resume = root.interrupted || isInterrupted(findLeaf(collectArrivalLeafSteps(), root.stepId));
       primary = h("button", {
         class: "btn primary",
-        text: "Retry from " + root.stepId,
-        title: "Re-run " + root.stepId + " and everything it blocked; steps that already succeeded are reused.",
+        text: (resume ? "Resume from " : "Retry from ") + root.stepId,
+        title: "Re-run " + root.stepId + " and everything after it; steps that already succeeded are reused.",
         onClick: function () { ST.modals.rerunHistory(S.runId, S.selected, "retry"); }
       });
       actions.appendChild(primary);
@@ -322,8 +456,25 @@
     });
   }
 
+  /**
+   * The run's own verdict. The steps alone cannot say it: a canceled run's
+   * interrupted step reads as a failure, and a budget stop has no failed step.
+   */
+  function arrivalState(report) {
+    if (S.runStatus === "canceled") return { text: "canceled", cls: " stopped" };
+    if (S.runStatus === "timed-out") return { text: "timed out", cls: " failed" };
+    if (S.runStatus === "budget-exceeded") return { text: "budget reached", cls: " failed" };
+    if (S.runStatus === "error") return { text: "failed", cls: " failed" };
+    // The final status frame lands just after the last event: until then a
+    // run whose only casualties were interrupted is "stopped", not failed.
+    if (!S.runStatus && !report.receipt.ok && !report.receipt.failCount && report.receipt.interruptedCount) {
+      return { text: "stopped", cls: " stopped" };
+    }
+    return report.receipt.ok ? { text: "complete", cls: "" } : { text: "failed", cls: " failed" };
+  }
+
   function renderHead(report, root, headline) {
-    var failed = !report.receipt.ok;
+    var state = arrivalState(report);
     var head = h("div", { class: "arrival-head" });
     var top = h("div", { class: "arrival-idline" });
     // Same 5-char stem the breadcrumb and the runs rail use: the full uuid is
@@ -333,10 +484,7 @@
       title: S.runId || "",
       text: S.runId ? "Run " + S.runId.slice(0, 5) : (S.runState.name || S.selected || "Run")
     }));
-    top.appendChild(h("span", {
-      class: "arrival-state" + (failed ? " failed" : ""),
-      text: failed ? "failed" : "complete"
-    }));
+    top.appendChild(h("span", { class: "arrival-state" + state.cls, text: state.text }));
     var actions = renderRunActions(report, root, headline);
     top.appendChild(actions.node);
     head.appendChild(top);
@@ -362,14 +510,20 @@
   // ---- root cause ------------------------------------------------------------
 
   function renderRootCause(root, leaves) {
-    var box = h("div", { class: "rootcause" });
-    var title = h("div", { class: "rootcause-head" },
-      h("span", { class: "kicker", text: root.killed ? "Stopped here" : "Root cause" }),
-      h("span", { class: "what" },
+    var interrupted = root.interrupted || isInterrupted(findLeaf(leaves, root.stepId));
+    var box = h("div", { class: "rootcause" + (interrupted ? " interrupted" : "") });
+    var what = interrupted
+      ? h("span", { class: "what" },
+        "Run canceled while ",
+        h("code", { text: root.stepId }),
+        root.blockKind === "approval" || root.blockKind === "human" ? " waited for a decision" : " was running")
+      : h("span", { class: "what" },
         "Step ",
         h("code", { text: root.stepId }),
-        " " + (root.killed ? "was killed" : "failed") + ": " + root.error
-      )
+        " " + (root.killed ? "was killed" : "failed") + ": " + root.error);
+    var title = h("div", { class: "rootcause-head" },
+      h("span", { class: "kicker", text: root.killed || interrupted ? "Stopped here" : "Root cause" }),
+      what
     );
     var where = ["phase " + root.phaseNumber, KIND_LABEL[root.blockKind] || root.blockKind];
     if (typeof root.durationMs === "number") where.push("after " + fmtElapsed(root.durationMs));
@@ -426,9 +580,18 @@
     tiles.appendChild(tile("Elapsed", h("div", { class: "v", text: fmtElapsed(r.durationMs) || "0.0s" })));
 
     var steps = h("div", { class: "v" }, h("span", { class: "ok", text: r.okCount + " ok" }));
-    if (r.failCount) {
+    // The report already keeps marked interruptions out of failCount; a record
+    // from before the marker is caught by isInterrupted's text fallback.
+    var legacy = leaves.filter(function (s) { return isInterrupted(s) && !s.result.interrupted; }).length;
+    var interrupted = (r.interruptedCount || 0) + legacy;
+    var failed = Math.max(0, r.failCount - legacy);
+    if (failed) {
       steps.appendChild(h("span", { class: "sep", text: " · " }));
-      steps.appendChild(h("span", { class: "bad", text: r.failCount + " failed" }));
+      steps.appendChild(h("span", { class: "bad", text: failed + " failed" }));
+    }
+    if (interrupted) {
+      steps.appendChild(h("span", { class: "sep", text: " · " }));
+      steps.appendChild(h("span", { class: "faint", text: interrupted + " interrupted" }));
     }
     var notRun = (r.skipCount || 0) + (r.blockedCount || 0);
     if (notRun) {
@@ -440,10 +603,13 @@
     tiles.appendChild(tile("Model spend", spendValue(r, leaves)));
 
     var left = h("div", { class: "v" });
-    if (worktrees.left > 0) {
-      left.appendChild(document.createTextNode(worktrees.left + " worktree" + (worktrees.left === 1 ? "" : "s") + " "));
+    if (!worktrees) {
+      left.className = "v note";
+      left.textContent = worktreeFootText(null);
+    } else if (worktrees.changed > 0) {
+      left.appendChild(document.createTextNode(plural(worktrees.changed, "worktree") + " with changes "));
       left.appendChild(h("button", {
-        class: "linkish", type: "button", text: "clean up",
+        class: "linkish", type: "button", text: "review",
         title: "Open this run's receipt, where its worktrees can be applied or pruned",
         onClick: function () { ST.runs.open(S.runId); }
       }));
@@ -572,10 +738,13 @@
     ran.forEach(function (s) {
       var kind = KIND_LABEL[s.blockKind] || s.blockKind || "step";
       var r = s.result || {};
-      var bad = !r.ok;
+      var cut = isInterrupted(s);
+      var bad = !r.ok && !cut;
       var outcome = r.ok
         ? (s.cached ? "reused a cached result" : "succeeded")
-        : ((r.error || "failed").split("\n", 1)[0] || "failed");
+        : cut
+          ? "interrupted — run canceled"
+          : ((r.error || "failed").split("\n", 1)[0] || "failed");
       rows.appendChild(ledgerRow(s, {
         cls: bad ? "failed" : "",
         sub: kind + " · " + outcome,
@@ -636,7 +805,8 @@
 
     var body = h("div", { class: "arrival-body" });
     if (root) body.appendChild(renderRootCause(root, leaves));
-    var worktrees = computeWorktreeStats(leaves);
+    loadArrivalWorktrees(S.runId);
+    var worktrees = computeWorktreeStats();
     body.appendChild(renderTiles(report, leaves, worktrees));
 
     // Whatever the banner and the ledger have not already said: retries, gates
@@ -658,7 +828,7 @@
     }
     var sandbox = computeSandboxStats(leaves);
     foot.appendChild(footRow("sandbox", sandbox.readOnly + " read-only · " + sandbox.violations + " violations"));
-    foot.appendChild(footRow("worktrees", worktrees.merged + " merged back · " + worktrees.left + " left"));
+    foot.appendChild(footRow("worktrees", worktreeFootText(worktrees)));
     var retries = computeRetryStats(leaves);
     foot.appendChild(footRow("retries", retries.count + (retries.ids.length === 1 ? " (" + retries.ids[0] + ")" : "")));
     ledger.appendChild(foot);
@@ -687,8 +857,11 @@
    */
   function renderNotes(report, root) {
     var box = h("div", { class: "arrival-report" });
+    var interrupted = {};
+    collectArrivalLeafSteps().forEach(function (s) { if (isInterrupted(s)) interrupted[s.stepId] = true; });
     var notices = (report.notices || []).filter(function (n) {
       if (root && n.stepId === root.stepId) return false;
+      if (interrupted[n.stepId]) return false;
       return !(root && root.blocked.indexOf(n.stepId) !== -1);
     });
     if (notices.length) {

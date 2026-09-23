@@ -131,7 +131,10 @@ export type RunRecordStatus = "done" | "error" | "canceled" | "budget-exceeded";
 export interface RunTotals {
   steps: number;
   ok: number;
+  /** Steps that broke on their own; a step the run's cancel took down is not one. */
   failed: number;
+  /** Steps the run's cancel or timeout took down mid-flight (absent on older records). */
+  interrupted?: number;
   cached: number;
   costUsd: number;
   /** Aggregate token usage across all leaf steps (fan-out children, not parents). */
@@ -157,6 +160,11 @@ export interface RunRecord {
   phases: HistoryPhase[];
   totals: RunTotals;
   error?: string;
+  /**
+   * Set on a canceled run its whole-workflow timeout stopped, not a person;
+   * `status` stays "canceled" for both.
+   */
+  timedOut?: boolean;
   /** Set when a cost budget stopped the run; drives the "budget-exceeded" status. */
   budget?: RunBudgetInfo;
   /** What happened to this run's step worktrees after the run (CLI apply/prune). */
@@ -200,6 +208,7 @@ export function computeRunTotals(phases: HistoryPhase[]): RunTotals {
     steps: 0,
     ok: 0,
     failed: 0,
+    interrupted: 0,
     cached: 0,
     costUsd: 0,
     tokens: emptyTokens(),
@@ -216,8 +225,10 @@ export function computeRunTotals(phases: HistoryPhase[]): RunTotals {
       // execute, so they don't contribute to the executed-step totals.
       if (step.status === "pending") continue;
       totals.steps += 1;
-      if (step.status === "error") totals.failed += 1;
-      else if (step.status === "done") totals.ok += 1;
+      if (step.status === "error") {
+        if (step.result?.interrupted) totals.interrupted = (totals.interrupted ?? 0) + 1;
+        else totals.failed += 1;
+      } else if (step.status === "done") totals.ok += 1;
       if (step.cached) totals.cached += 1;
       // A cached replay was billed to the run that produced it, not this one.
       else {
@@ -276,6 +287,7 @@ export function formatRunTotals(
 ): string {
   const parts = [`${totals.ok}/${totals.steps} ok`];
   if (totals.failed > 0) parts.push(`${totals.failed} failed`);
+  if (totals.interrupted) parts.push(`${totals.interrupted} interrupted`);
   if (opts?.cached && totals.cached > 0) parts.push(`${totals.cached} cached`);
   if (typeof opts?.durationMs === "number") parts.push(`${(opts.durationMs / 1000).toFixed(1)}s`);
   if (totals.costUsd > 0) parts.push(`$${totals.costUsd.toFixed(4)}`);
@@ -538,7 +550,12 @@ export class RunRecordBuilder {
     }
   }
 
-  build(opts: { status: RunRecordStatus; error?: string; endedAt?: number }): RunRecord {
+  build(opts: {
+    status: RunRecordStatus;
+    error?: string;
+    endedAt?: number;
+    timedOut?: boolean;
+  }): RunRecord {
     const endedAt = opts.endedAt ?? Date.now();
     const phases = this.finalizePhases();
     return {
@@ -557,6 +574,7 @@ export class RunRecordBuilder {
       phases,
       totals: computeRunTotals(phases),
       error: opts.error,
+      timedOut: opts.status === "canceled" && opts.timedOut ? true : undefined,
       budget: this.budget,
       interventions: this.interventions.length > 0 ? this.interventions : undefined,
     };

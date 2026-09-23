@@ -805,6 +805,7 @@ var SteamtrainReducer = (() => {
     let failCount = 0;
     let skipCount = 0;
     let blockedCount = 0;
+    let interruptedCount = 0;
     let costUsd = 0;
     let tokens = 0;
     let durationMs = 0;
@@ -812,6 +813,7 @@ var SteamtrainReducer = (() => {
       if (result.skipped) skipCount += 1;
       else if (result.ok) okCount += 1;
       else if (isCascadeVictim(result)) blockedCount += 1;
+      else if (result.interrupted) interruptedCount += 1;
       else failCount += 1;
       costUsd += result.costUsd ?? 0;
       tokens += totalTokens(result.tokens);
@@ -857,6 +859,7 @@ var SteamtrainReducer = (() => {
         durationMs: opts.elapsedMs && opts.elapsedMs > 0 ? opts.elapsedMs : durationMs,
         okCount,
         failCount,
+        interruptedCount,
         skipCount,
         blockedCount,
         costUsd,
@@ -882,6 +885,7 @@ var SteamtrainReducer = (() => {
     if (!state.done || state.ok) return null;
     const blocked = [];
     let root = null;
+    let stoppedAt = null;
     for (const phase of state.phases) {
       for (const step of phase.steps) {
         const result2 = step.result;
@@ -891,11 +895,12 @@ var SteamtrainReducer = (() => {
           blocked.push(step.stepId);
           continue;
         }
-        if (!root) {
-          root = { step, phaseNumber: phase.index + 1, phaseTitle: phase.title };
-        }
+        const candidate = { step, phaseNumber: phase.index + 1, phaseTitle: phase.title };
+        if (result2.interrupted) stoppedAt ?? (stoppedAt = candidate);
+        else root ?? (root = candidate);
       }
     }
+    root ?? (root = stoppedAt);
     if (!root) return null;
     const result = root.step.result;
     const firstLine = (result?.error ?? "").split("\n", 1)[0]?.trim();
@@ -907,6 +912,7 @@ var SteamtrainReducer = (() => {
       error: firstLine || "failed",
       durationMs: result?.durationMs,
       killed: Boolean(result?.killed),
+      interrupted: root === stoppedAt,
       blocked
     };
   }
@@ -929,6 +935,13 @@ var SteamtrainReducer = (() => {
             stepId: step.stepId,
             what: `${step.stepId} was killed`,
             where: detail?.startsWith("killed ") ? detail.slice("killed ".length) : detail
+          });
+        } else if (result.interrupted) {
+          notices.push({
+            severity: "high",
+            stepId: step.stepId,
+            what: `${step.stepId} was interrupted`,
+            where: "the run was stopped while it ran"
           });
         } else if (result.dependencyFailed) {
           notices.push({
@@ -1002,11 +1015,13 @@ var SteamtrainReducer = (() => {
     else if (receipt.costReported !== false) parts.push("$0");
     parts.push(`${(receipt.durationMs / 1e3).toFixed(1)}s`);
     if (receipt.failCount > 0) parts.push(`${receipt.failCount} failed`);
+    if (receipt.interruptedCount > 0) parts.push(`${receipt.interruptedCount} interrupted`);
     return parts.join(" \xB7 ");
   }
   function arrivalReceiptCards(receipt) {
     const ranParts = [`${receipt.okCount} ok`];
     if (receipt.failCount) ranParts.push(`${receipt.failCount} failed`);
+    if (receipt.interruptedCount) ranParts.push(`${receipt.interruptedCount} interrupted`);
     const notRun = receipt.skipCount + (receipt.blockedCount ?? 0);
     if (notRun) ranParts.push(`${notRun} skipped`);
     const cost = receipt.agentless ? "$0 \xB7 no agents" : receipt.costUsd > 0 ? `$${receipt.costUsd.toFixed(4)}` : receipt.costReported === false ? "not reported" : "$0";
@@ -1022,6 +1037,7 @@ var SteamtrainReducer = (() => {
     parts.push(`${(receipt.durationMs / 1e3).toFixed(1)}s`);
     parts.push(`${receipt.okCount} ok`);
     if (receipt.failCount) parts.push(`${receipt.failCount} failed`);
+    if (receipt.interruptedCount) parts.push(`${receipt.interruptedCount} interrupted`);
     const notRun = receipt.skipCount + (receipt.blockedCount ?? 0);
     if (notRun) parts.push(`${notRun} skipped`);
     if (receipt.agentless) parts.push("$0 \xB7 no agents");
@@ -1043,9 +1059,10 @@ var SteamtrainReducer = (() => {
     return out.filter((r) => !r.childResults?.length);
   }
   function rootFailureLines(steps) {
-    const failed = steps.filter((s) => s.result && !s.result.ok && !s.result.skipped);
+    const notOk = steps.filter((s) => s.result && !s.result.ok && !s.result.skipped);
+    const failed = notOk.filter((s) => !s.result?.interrupted);
     const roots = failed.filter((s) => !isCascadeVictim(s.result));
-    const shown = roots.length > 0 ? roots : failed;
+    const shown = roots.length > 0 ? roots : notOk.length > failed.length ? [] : failed;
     return shown.map((s) => {
       const firstErrLine = (s.result?.error ?? "failed").split("\n", 1)[0]?.trim() || "failed";
       const capped = firstErrLine.length > 200 ? `${firstErrLine.slice(0, 199)}\u2026` : firstErrLine;

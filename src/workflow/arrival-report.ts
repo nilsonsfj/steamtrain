@@ -9,6 +9,8 @@ interface ArrivalStepResult {
   skipped?: boolean;
   /** Set by the engine on a step that never ran because a dependency broke. */
   dependencyFailed?: string;
+  /** Set by the engine on a step the run's own cancel took down. */
+  interrupted?: boolean;
   error?: string;
   output?: string;
   durationMs?: number;
@@ -33,6 +35,11 @@ export interface ArrivalReceipt {
    * "4 failed" and sent readers hunting for three failures that never happened.
    */
   failCount: number;
+  /**
+   * Steps the run's cancel (or timeout) took down mid-flight. Like a cascade
+   * victim they did not break on their own, so they are not in `failCount`.
+   */
+  interruptedCount: number;
   /** Steps whose `when` condition was false. */
   skipCount: number;
   /** Steps that never started because a dependency broke first. */
@@ -68,6 +75,11 @@ export interface ArrivalRootCause {
   durationMs?: number;
   /** True when a human (or the run's cancellation) killed the step. */
   killed: boolean;
+  /**
+   * True when no step broke on its own and this is only where the run was
+   * stopped (the first step its cancel took down): not a cause to fix.
+   */
+  interrupted: boolean;
   /** Steps that never started because this one broke, in run order. */
   blocked: string[];
 }
@@ -145,6 +157,7 @@ export function buildArrivalReport(
   let failCount = 0;
   let skipCount = 0;
   let blockedCount = 0;
+  let interruptedCount = 0;
   let costUsd = 0;
   let tokens = 0;
   let durationMs = 0;
@@ -152,6 +165,7 @@ export function buildArrivalReport(
     if (result.skipped) skipCount += 1;
     else if (result.ok) okCount += 1;
     else if (isCascadeVictim(result)) blockedCount += 1;
+    else if (result.interrupted) interruptedCount += 1;
     else failCount += 1;
     costUsd += result.costUsd ?? 0;
     tokens += totalTokens(result.tokens);
@@ -222,6 +236,7 @@ export function buildArrivalReport(
       durationMs: opts.elapsedMs && opts.elapsedMs > 0 ? opts.elapsedMs : durationMs,
       okCount,
       failCount,
+      interruptedCount,
       skipCount,
       blockedCount,
       costUsd,
@@ -274,7 +289,10 @@ export function isCascadeVictim(
 export function arrivalRootCause(state: WorkflowState): ArrivalRootCause | null {
   if (!state.done || state.ok) return null;
   const blocked: string[] = [];
-  let root: { step: StepState; phaseNumber: number; phaseTitle: string } | null = null;
+  type Candidate = { step: StepState; phaseNumber: number; phaseTitle: string };
+  let root: Candidate | null = null;
+  // Where the run's cancel caught it — only the answer when nothing broke.
+  let stoppedAt: Candidate | null = null;
   for (const phase of state.phases) {
     for (const step of phase.steps) {
       const result = step.result;
@@ -285,11 +303,12 @@ export function arrivalRootCause(state: WorkflowState): ArrivalRootCause | null 
         blocked.push(step.stepId);
         continue;
       }
-      if (!root) {
-        root = { step, phaseNumber: phase.index + 1, phaseTitle: phase.title };
-      }
+      const candidate = { step, phaseNumber: phase.index + 1, phaseTitle: phase.title };
+      if (result.interrupted) stoppedAt ??= candidate;
+      else root ??= candidate;
     }
   }
+  root ??= stoppedAt;
   if (!root) return null;
   const result = root.step.result;
   const firstLine = (result?.error ?? "").split("\n", 1)[0]?.trim();
@@ -301,6 +320,7 @@ export function arrivalRootCause(state: WorkflowState): ArrivalRootCause | null 
     error: firstLine || "failed",
     durationMs: result?.durationMs,
     killed: Boolean(result?.killed),
+    interrupted: root === stoppedAt,
     blocked,
   };
 }
@@ -340,6 +360,13 @@ export function arrivalNotices(steps: StepState[]): ArrivalNotice[] {
           stepId: step.stepId,
           what: `${step.stepId} was killed`,
           where: detail?.startsWith("killed ") ? detail.slice("killed ".length) : detail,
+        });
+      } else if (result.interrupted) {
+        notices.push({
+          severity: "high",
+          stepId: step.stepId,
+          what: `${step.stepId} was interrupted`,
+          where: "the run was stopped while it ran",
         });
       } else if (result.dependencyFailed) {
         notices.push({
@@ -438,6 +465,7 @@ export function formatArrivalHeadline(
   else if (receipt.costReported !== false) parts.push("$0");
   parts.push(`${(receipt.durationMs / 1000).toFixed(1)}s`);
   if (receipt.failCount > 0) parts.push(`${receipt.failCount} failed`);
+  if (receipt.interruptedCount > 0) parts.push(`${receipt.interruptedCount} interrupted`);
   return parts.join(" · ");
 }
 
@@ -449,6 +477,7 @@ export function arrivalReceiptCards(receipt: ArrivalReceipt): Array<{
 }> {
   const ranParts = [`${receipt.okCount} ok`];
   if (receipt.failCount) ranParts.push(`${receipt.failCount} failed`);
+  if (receipt.interruptedCount) ranParts.push(`${receipt.interruptedCount} interrupted`);
   const notRun = receipt.skipCount + (receipt.blockedCount ?? 0);
   if (notRun) ranParts.push(`${notRun} skipped`);
   const cost = receipt.agentless
@@ -479,6 +508,7 @@ export function formatArrivalReceipt(receipt: ArrivalReceipt): string {
   parts.push(`${(receipt.durationMs / 1000).toFixed(1)}s`);
   parts.push(`${receipt.okCount} ok`);
   if (receipt.failCount) parts.push(`${receipt.failCount} failed`);
+  if (receipt.interruptedCount) parts.push(`${receipt.interruptedCount} interrupted`);
   const notRun = receipt.skipCount + (receipt.blockedCount ?? 0);
   if (notRun) parts.push(`${notRun} skipped`);
   if (receipt.agentless) parts.push("$0 · no agents");
@@ -512,9 +542,13 @@ function leafResults(state: WorkflowState): ArrivalStepResult[] {
  * beats a hero that says nothing about why the run stopped.
  */
 function rootFailureLines(steps: StepState[]): string[] {
-  const failed = steps.filter((s) => s.result && !s.result.ok && !s.result.skipped);
+  const notOk = steps.filter((s) => s.result && !s.result.ok && !s.result.skipped);
+  // A step the run's cancel took down did not fail: it is no line of blame.
+  const failed = notOk.filter((s) => !s.result?.interrupted);
   const roots = failed.filter((s) => !isCascadeVictim(s.result));
-  const shown = roots.length > 0 ? roots : failed;
+  // With no root, fall back to the victims — unless the run was simply
+  // stopped, in which case there is nothing to blame at all.
+  const shown = roots.length > 0 ? roots : notOk.length > failed.length ? [] : failed;
   return shown.map((s) => {
     const firstErrLine = (s.result?.error ?? "failed").split("\n", 1)[0]?.trim() || "failed";
     const capped = firstErrLine.length > 200 ? `${firstErrLine.slice(0, 199)}…` : firstErrLine;

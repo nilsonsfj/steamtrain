@@ -409,11 +409,14 @@
       return h("span", { class: "outcome gate",
         text: scope + " budget $" + run.budget.limitUsd.toFixed(4) + " reached" });
     }
+    // A timeout is recorded as canceled; the record's timedOut says which.
+    if (run.status === "canceled" && run.timedOut) return h("span", { class: "outcome gate", text: "timed out" });
     if (run.status === "canceled") return h("span", { class: "outcome", text: "canceled" });
     var totals = run.totals || {};
     var text = (totals.ok || 0) + "/" + (totals.steps || 0) + " ok";
     var node = h("span", { class: "outcome", text: text });
     if (totals.failed) node.appendChild(h("span", { class: "flag error", text: " · " + totals.failed + " failed" }));
+    if (totals.interrupted) node.appendChild(h("span", { class: "flag", text: " · " + totals.interrupted + " interrupted" }));
     if (totals.cached) node.appendChild(h("span", { class: "flag gate", text: " · " + totals.cached + " cached" }));
     return node;
   }
@@ -1167,6 +1170,7 @@
       return (t.ok || 0) + "/" + (t.steps || 0);
     }), "num");
     addRow("Failed", picked.map(function (run) { return String((run.totals && run.totals.failed) || 0); }), "num");
+    addRow("Interrupted", picked.map(function (run) { return String((run.totals && run.totals.interrupted) || 0); }), "num");
     addRow("Cached", picked.map(function (run) { return String((run.totals && run.totals.cached) || 0); }), "num");
     addRow("Tokens", picked.map(function (run) {
       var tok = totalTokens(run.totals && run.totals.tokens);
@@ -1273,6 +1277,7 @@
     tiles.appendChild(tile("Tokens", tokens > 0 ? fmtTokens(tokens) : "0"));
     tiles.appendChild(tile("Steps", (totals.ok || 0) + " ok"
       + (totals.failed ? " · " + totals.failed + " failed" : "")
+      + (totals.interrupted ? " · " + totals.interrupted + " interrupted" : "")
       + (totals.cached ? " · " + totals.cached + " cached" : "")));
     hero.appendChild(tiles);
     holder.appendChild(hero);

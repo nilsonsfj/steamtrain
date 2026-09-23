@@ -150,6 +150,8 @@ interface Run {
   /** Mid-run steering handle (pause / edit pending steps / resume). */
   control: WorkflowRunControl;
   timeoutTimer?: ReturnType<typeof setTimeout>;
+  /** The whole-workflow timeout fired: the canceled run was stopped by it. */
+  timedOut?: boolean;
   /**
    * Live approval checkpoints keyed by `<stepId>:<iteration>`. The engine's
    * injected provider registers a resolver here and blocks; a
@@ -863,7 +865,10 @@ export class WorkflowRunManager {
       // Arm the whole-workflow wall-clock timer now that the run is executing.
       const workflowTimeoutMs = timeoutMsFromSec(resolveWorkflowTimeoutSec(spec, this.config));
       if (workflowTimeoutMs > 0) {
-        run.timeoutTimer = setTimeout(() => run.controller.abort(), workflowTimeoutMs);
+        run.timeoutTimer = setTimeout(() => {
+          run.timedOut = true;
+          run.controller.abort();
+        }, workflowTimeoutMs);
         run.timeoutTimer.unref?.();
       }
 
@@ -990,12 +995,17 @@ export class WorkflowRunManager {
         const status: RunRecordStatus = run.status === "running" ? "done" : run.status;
         try {
           if (publisher) {
-            await publisher.finish(status, { ok: run.ok, error: run.error });
+            await publisher.finish(status, {
+              ok: run.ok,
+              error: run.error,
+              timedOut: run.timedOut,
+            });
           } else {
             await this.liveRuns.update(run.id, {
               status,
               ok: run.ok,
               error: run.error,
+              timedOut: run.timedOut || undefined,
               endedAt: run.endedAt,
               pendingApprovals: [],
               pendingInputs: [],
@@ -1021,6 +1031,7 @@ export class WorkflowRunManager {
             status: run.status,
             ok: run.ok,
             error: run.error,
+            timedOut: run.timedOut,
           }),
           true,
         );
@@ -1036,7 +1047,7 @@ export class WorkflowRunManager {
     const status = run.status === "running" ? "done" : run.status;
     try {
       await this.historyStore.save(
-        recorder.build({ status, error: run.error, endedAt: run.endedAt }),
+        recorder.build({ status, error: run.error, endedAt: run.endedAt, timedOut: run.timedOut }),
       );
     } catch {
       // History is best-effort; a failed write must not surface to the run.

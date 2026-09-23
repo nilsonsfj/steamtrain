@@ -133,7 +133,22 @@
     foot.appendChild(box);
   }
 
-  /** Rail footer: runs that are elsewhere — detached, or blocked on approval. */
+  /**
+   * What a live run is doing, as the rail states it. Waiting on a person comes
+   * first: that is the one a reader has to act on.
+   */
+  function liveRunState(run) {
+    if (run.pendingApprovals && run.pendingApprovals.length) return { cls: "awaiting", text: "awaiting approval" };
+    if (run.pendingInputs && run.pendingInputs.length) return { cls: "awaiting", text: "waiting for input" };
+    if (run.status === "queued") return { cls: "queued", text: "queued" };
+    if (run.paused) return { cls: "awaiting", text: "paused" };
+    return { cls: run.detached ? "detached" : "running", text: run.detached ? "detached" : "running" };
+  }
+
+  /**
+   * Rail footer: every live run the cockpit is not showing, so leaving a run
+   * never loses it — plus the attached one while it waits on a person.
+   */
   function renderLiveRuns() {
     ensureRailSkeleton();
     var foot = document.getElementById("railFoot");
@@ -141,20 +156,19 @@
     clear(foot);
     renderRunShape(foot);
     var elsewhere = S.liveRuns.filter(function (run) {
-      return run.detached || (run.pendingApprovals && run.pendingApprovals.length);
+      return run.id !== S.runId || liveRunState(run).cls === "awaiting";
     });
     elsewhere.forEach(function (run) {
-      var awaiting = !run.detached && run.pendingApprovals && run.pendingApprovals.length;
+      var state = liveRunState(run);
       var row = h("button", {
-        class: "elsewhere-row" + (run.detached ? " detached" : "") + (awaiting ? " awaiting" : ""),
+        class: "elsewhere-row " + state.cls,
         type: "button",
         title: truncate(run.input || "", 80),
         onClick: function () { attachRun(run); }
       });
       row.appendChild(h("span", { class: "dot" }));
       row.appendChild(h("span", {
-        text: run.workflow + " · " + (run.detached ? "detached" : "awaiting approval") +
-          " · " + relTime(run.startedAt)
+        text: run.workflow + " · " + state.text + " · " + relTime(run.startedAt)
       }));
       foot.appendChild(row);
     });
@@ -171,7 +185,8 @@
           onClick: function () { ST.runs.open(run.id); }
         });
         row.appendChild(h("span", { class: "dot" }));
-        var right = !ok ? run.status
+        // A timeout is recorded as canceled; the record's timedOut says which.
+        var right = !ok ? (run.status === "canceled" && run.timedOut ? "timed out" : run.status)
           : run.totals && run.totals.costUsd > 0 ? "$" + run.totals.costUsd.toFixed(3)
           : "ok";
         row.appendChild(h("span", { text: run.id.slice(0, 5) + " · " + relTime(run.startedAt) + " · " + right }));

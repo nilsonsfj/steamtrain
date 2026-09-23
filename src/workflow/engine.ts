@@ -43,7 +43,7 @@ import {
 import { collectArtifacts } from "./artifacts";
 import { MAX_COMMAND_OUTPUT_BYTES, runShellCommand } from "./command";
 import type { StepEditPatch, StepKillResult, WorkflowRunControl } from "./control";
-import { addTokens, replayedSpend } from "./cost";
+import { addSpend, addTokens, replayedSpend } from "./cost";
 import type { StepPermissionsInfo, WorkflowEvent } from "./events";
 import type { StepRetryEvent } from "./events";
 import { mergeConflictGuidance } from "./gc";
@@ -311,7 +311,7 @@ interface RunEnv {
    * {@link reRunDependency}.
    */
   ranLive: Set<string>;
-  /** Memoized {@link computeEffectiveDeps} graph; built on first staleness check. */
+  /** Memoized data-only {@link computeEffectiveDeps} graph; built on first staleness check. */
   stepDeps?: Map<string, Set<string>>;
   /** Tracks the emitted pause state so `run_paused`/`run_resumed` fire once per transition. */
   pauseState: { acked: boolean };
@@ -656,7 +656,7 @@ function stepEditIssue(env: RunEnv, stepId: string, patch: StepEditPatch): strin
  */
 function invalidateEditedStep(env: RunEnv, stepId: string): void {
   dropStepEntries(env, stepId);
-  const deps = computeEffectiveDeps(env.spec);
+  const deps = computeEffectiveDeps(env.spec, { dataOnly: true });
   const invalidated = new Set([stepId]);
   // Fixed-point pass: cheap at spec scale, and only runs on a human edit.
   let changed = true;
@@ -702,7 +702,7 @@ function recordStepSession(sessions: Map<string, string>, result: StepResult): v
  */
 function reRunDependency(env: RunEnv, stepId: string): string | undefined {
   if (env.ranLive.size === 0) return undefined;
-  env.stepDeps ??= computeEffectiveDeps(env.spec);
+  env.stepDeps ??= computeEffectiveDeps(env.spec, { dataOnly: true });
   for (const dep of env.stepDeps.get(stepId) ?? []) {
     if (env.ranLive.has(dep)) return dep;
   }
@@ -1107,14 +1107,27 @@ function templateStepRefs(text: string | undefined): string[] {
  * phase are ignored — templates already render them as-is/empty, and the
  * validator has its own rules for the explicit fields. A `steps.work[3].…`
  * child reference resolves to its `work` parent.
+ *
+ * `dataOnly` keeps just the edges a step's result can be computed from — what
+ * decides whether a cached result is stale. Control gates only order a step,
+ * and an approval checkpoint is re-asked on every resume by design, so
+ * counting either made every step after an approval re-run on each resume. An
+ * approval or gate still counts where a step reads it (template, condition).
+ * The phase barrier stays: outside a git repo, or past a `merge` that applied
+ * to the checkout, an earlier step's files are what a later one works on.
  */
-function computeEffectiveDeps(spec: WorkflowSpec): Map<string, Set<string>> {
+function computeEffectiveDeps(
+  spec: WorkflowSpec,
+  options: { dataOnly?: boolean } = {},
+): Map<string, Set<string>> {
+  const dataOnly = options.dataOnly === true;
   const idsByPhase = spec.phases.map((p) => p.steps.map((s) => s.id));
   const phaseIndexOf = new Map<string, number>();
   idsByPhase.forEach((ids, pi) => {
     for (const id of ids) phaseIndexOf.set(id, pi);
   });
   const controlGates: { id: string; phaseIndex: number }[] = [];
+  const checkpointIds = new Set<string>();
   spec.phases.forEach((phase, pi) => {
     for (const step of phase.steps) {
       // A human-approval checkpoint (approval step, or a gate with
@@ -1123,6 +1136,8 @@ function computeEffectiveDeps(spec: WorkflowSpec): Map<string, Set<string>> {
       // control deps only when they can halt (fail/stop).
       const isApprovalCheckpoint =
         step.kind === "approval" || (step.kind === "gate" && step.condition.human === true);
+      // A gate writes nothing: whoever reads its verdict names it.
+      if (isApprovalCheckpoint || step.kind === "gate") checkpointIds.add(step.id);
       if (
         isApprovalCheckpoint ||
         (step.kind === "gate" && (step.onFalse === "fail" || step.onFalse === "stop"))
@@ -1150,10 +1165,14 @@ function computeEffectiveDeps(spec: WorkflowSpec): Map<string, Set<string>> {
       };
 
       if (step.dependsOn) {
-        for (const dep of step.dependsOn) addEarlier(dep);
+        for (const dep of step.dependsOn) {
+          if (!(dataOnly && checkpointIds.has(dep))) addEarlier(dep);
+        }
       } else {
         for (let pj = 0; pj < pi; pj++) {
-          for (const id of idsByPhase[pj] ?? []) stepDeps.add(id);
+          for (const id of idsByPhase[pj] ?? []) {
+            if (!(dataOnly && checkpointIds.has(id))) stepDeps.add(id);
+          }
         }
       }
 
@@ -1212,8 +1231,10 @@ function computeEffectiveDeps(spec: WorkflowSpec): Map<string, Set<string>> {
         for (const ref of templateStepRefs(text)) addEarlier(ref);
       }
 
-      for (const gate of controlGates) {
-        if (gate.phaseIndex < pi && gate.id !== step.id) stepDeps.add(gate.id);
+      if (!dataOnly) {
+        for (const gate of controlGates) {
+          if (gate.phaseIndex < pi && gate.id !== step.id) stepDeps.add(gate.id);
+        }
       }
 
       deps.set(step.id, stepDeps);
@@ -1546,6 +1567,15 @@ async function runSingleStep(
     // entry would kill the next iteration for a request nobody made.
     env.killedSteps.delete(step.id);
     markKilledResult(execution.result, by);
+  }
+  // A step that ended not-ok while the run was being aborted was taken down
+  // with the run: say so explicitly rather than leave UIs to guess from its
+  // error text, which is the adapter's own message whenever it had one.
+  if (env.signal?.aborted) {
+    for (const r of [execution.result, ...(execution.childResults ?? [])]) {
+      // A budget placeholder (`notRun`) never started, so nothing was cut short.
+      if (!r.ok && !r.killed && !r.dependencyFailed && !r.notRun) r.interrupted = true;
+    }
   }
 
   if (execution.gate) {
@@ -3481,23 +3511,6 @@ async function executeCommandStep(
   } finally {
     await workspace.dispose();
   }
-}
-
-/**
- * The combined `costUsd` / `tokens` of two results, each left `undefined` when
- * neither side reports it (so an unpriced agent never reads as "$0").
- */
-function addSpend(
-  a: Pick<StepResult, "costUsd" | "tokens">,
-  b: Pick<StepResult, "costUsd" | "tokens">,
-): Pick<StepResult, "costUsd" | "tokens"> {
-  return {
-    costUsd:
-      a.costUsd === undefined && b.costUsd === undefined
-        ? undefined
-        : (a.costUsd ?? 0) + (b.costUsd ?? 0),
-    tokens: a.tokens || b.tokens ? addTokens(a.tokens, b.tokens) : undefined,
-  };
 }
 
 /** Exact USD cost from the effective per-MTok rates and the API-reported usage. */

@@ -318,5 +318,8 @@ describe("cost attribution for llm leaves", () => {
     expect(modelKey({ api: "groq", model: "llama-3.3-70b" })).toBe("groq/llama-3.3-70b");
     expect(modelKey({ agent: "claude", model: "claude-opus-4-8" })).toBe("claude/claude-opus-4-8");
     expect(modelKey({ api: "anthropic" })).toBe("anthropic");
+    expect(modelKey({ agent: "opencode", model: "opencode/mimo-v2.6-flash-free" })).toBe(
+      "opencode/mimo-v2.6-flash-free",
+    );
   });
 });

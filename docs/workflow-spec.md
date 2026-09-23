@@ -1479,7 +1479,11 @@ Semantics:
   the source's file edits. Note that agent CLIs store sessions on the machine
   that ran them (some key them by working directory), so whether a session is
   resumable from a different worktree path is ultimately the CLI's call — the
-  step fails with the CLI's own error if it is not.
+  step fails with the CLI's own error if it is not. OpenCode (and MiMo) run a
+  resumed session in the directory that created it, so when the continuing
+  step has its own worktree steamtrain first copies the session there
+  (`opencode export` → `opencode import`, with fresh ids); the source session
+  is left as it was.
 
 ## Tool permissions (`permissions`)
 

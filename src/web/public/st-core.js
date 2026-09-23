@@ -68,6 +68,14 @@ window.Steamtrain = (function () {
     runDetached: false,
     startedAt: 0, timer: null,
     runState: null,
+    // The attached run's final status ("done" | "error" | "canceled" |
+    // "budget-exceeded") once its terminal frame arrives; null while live.
+    runStatus: null,
+    // Server's view of the finished run's worktrees for the arrival page
+    // ({ runId, sources, harvest } | { runId, pending } | { runId, failed }).
+    arrivalWorktrees: null,
+    // Run id the arrival page's "status frame never came" fallback timer is armed for.
+    arrivalWorktreesWait: null,
     rafQueued: false, draftAbort: null, doctor: [], apiDoctor: [], doctorReadAt: 0,
     // Reported by /api/doctor: the PATH the server searched, and where it came
     // from. Explains "absent" runners; see buildPathDetail in st-settings.js.
@@ -671,6 +679,7 @@ window.Steamtrain = (function () {
         return run.status === "running" || run.status === "queued";
       });
       ST.shell.renderLiveRuns();
+      if (ST.run && ST.run.updateRunPill) ST.run.updateRunPill();
       // When the attached run leaves (or re-enters) the Active runs list, the
       // workflow catalog's selection highlight must flip with it.
       if (wasAttached !== isLiveAttached()) ST.shell.renderSidebar();
@@ -928,6 +937,7 @@ window.Steamtrain = (function () {
       setRunDeepLink(run.id);
       ST.run.setRunning(true);
       S.startedAt = run.startedAt || Date.now();
+      S.runStatus = null;
       ST.run.startTimer();
       // setRunning(true) above already revealed the run header's metrics strip.
       // Replay rebuilds the tree from the event stream (workflow_start keeps
@@ -1401,7 +1411,7 @@ window.Steamtrain = (function () {
     S.detail = null; S.detailInvoker = null; S.detailFallback = null; S.detailFocusPending = false; S.detailFocusGeneration += 1;
     S.selectedStepId = null; S.collapsedBandKey = null;
     S.tailScroll = {}; S.stepListScroll = {}; S.drawerScroll = { follow: true, top: 0 }; S.approvalDiffOpen = {}; S.humanInputDraft = {}; S.subWorkflowOpen = {}; S.loopPass = {}; S.rowOpen = {}; S.unfolded = {}; S.unrolled = {};
-    S.arrivalEnter = false; S.endedAt = 0;
+    S.arrivalEnter = false; S.endedAt = 0; S.runStatus = null;
     S.arrivalCtaFocused = false;
     S.arrivalOutputStep = null;
     S.arrivalMenuOpen = false;
@@ -1611,7 +1621,8 @@ window.Steamtrain = (function () {
     var map = {};
     steps.forEach(function (s) {
       if (!s.result || (s.result.childResults && s.result.childResults.length)) return;
-      var key = s.model && s.agent
+      // OpenCode-style ids already lead with their provider (`opencode/<model>`).
+      var key = s.model && s.agent && s.model.indexOf(s.agent + "/") !== 0
         ? agentUiLabel(s.agent) + "/" + s.model
         : (s.model || (s.agent ? agentUiLabel(s.agent) : "(agentless)"));
       var e = map[key] || (map[key] = { model: key, costUsd: 0, tokens: emptyTokens(), steps: 0, cached: 0 });

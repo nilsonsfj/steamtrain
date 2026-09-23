@@ -128,4 +128,117 @@ describe("cache staleness", () => {
     expect(stepDone(events, "c").cached).toBe(false);
     expect(stepDone(events, "c").result.output.trim()).toBe("c-fresh");
   });
+
+  it("replays settled work after an approval, which a resume always re-asks", async () => {
+    // plan → approval → build: the approval never caches, so on resume it runs
+    // again — that alone must not make `build` redo work it already did.
+    const gated: WorkflowSpec = {
+      name: "approve-then-build",
+      phases: [
+        { id: "p1", title: "Plan", steps: [{ id: "plan", kind: "command", cmd: "echo plan" }] },
+        { id: "p2", title: "Approve", steps: [{ id: "ok", kind: "approval" }] },
+        {
+          id: "p3",
+          title: "Build",
+          steps: [{ id: "build", kind: "command", dependsOn: ["ok"], cmd: "echo build-fresh" }],
+        },
+        {
+          id: "p4",
+          title: "Ship",
+          steps: [{ id: "ship", kind: "command", cmd: "echo ship-fresh" }],
+        },
+      ],
+    };
+    const cache = new Map([
+      ["plan", cachedResult("plan", "plan\n")],
+      ["build", cachedResult("build", "build-cached")],
+      ["ship", cachedResult("ship", "ship-cached")],
+    ]);
+    const events: WorkflowEvent[] = [];
+    const approving: WorkflowDeps = {
+      ...deps(),
+      requestApproval: async () => ({ approved: true }),
+    };
+    for await (const ev of runWorkflow(gated, { input: "task", cache }, approving)) events.push(ev);
+
+    expect(stepDone(events, "ok").cached).toBe(false);
+    expect(stepDone(events, "build").cached).toBe(true);
+    expect(stepDone(events, "ship").cached).toBe(true);
+  });
+
+  it("replays a step that only waits on an approval, and re-runs one after a re-run step", async () => {
+    // Both omit dependsOn, so the phase barrier orders them. Past an approval
+    // that is all it is; past a command it can be data (outside a git repo the
+    // steps share one directory), so that one stays conservative.
+    const barrier: WorkflowSpec = {
+      name: "barrier",
+      phases: [
+        { id: "p1", title: "P1", steps: [{ id: "ok", kind: "approval" }] },
+        { id: "p2", title: "P2", steps: [{ id: "after-ok", kind: "command", cmd: "echo fresh" }] },
+        { id: "p3", title: "P3", steps: [{ id: "a", kind: "command", cmd: "echo a-fresh" }] },
+        { id: "p4", title: "P4", steps: [{ id: "after-a", kind: "command", cmd: "echo fresh" }] },
+      ],
+    };
+    const cache = new Map([
+      ["after-ok", cachedResult("after-ok", "cached")],
+      ["after-a", cachedResult("after-a", "cached")],
+    ]);
+    const events: WorkflowEvent[] = [];
+    const approving: WorkflowDeps = {
+      ...deps(),
+      requestApproval: async () => ({ approved: true }),
+    };
+    for await (const ev of runWorkflow(barrier, { input: "task", cache }, approving))
+      events.push(ev);
+
+    expect(stepDone(events, "after-ok").cached).toBe(true);
+    expect(stepDone(events, "after-a").cached).toBe(false);
+  });
+
+  it("replays past a gate, but re-runs a step that reads an approval's decision", async () => {
+    // `after-gate` depends on the gate only by dependsOn; `quotes` renders the
+    // approval's output — reading it, so a re-asked approval is new input.
+    const spec: WorkflowSpec = {
+      name: "gate-and-read",
+      phases: [
+        { id: "p1", title: "Src", steps: [{ id: "src", kind: "command", cmd: "echo x" }] },
+        {
+          id: "p2",
+          title: "Gate",
+          steps: [
+            { id: "g", kind: "gate", dependsOn: ["src"], condition: { step: "src", ok: true } },
+            { id: "ok", kind: "approval", dependsOn: ["src"] },
+          ],
+        },
+        {
+          id: "p3",
+          title: "After",
+          steps: [
+            { id: "after-gate", kind: "command", dependsOn: ["g"], cmd: "echo fresh" },
+            {
+              id: "quotes",
+              kind: "command",
+              dependsOn: ["ok"],
+              cmd: "echo 'decision {{steps.ok.output}}'",
+            },
+          ],
+        },
+      ],
+    };
+    const cache = new Map<string, StepResult>([
+      ["src", cachedResult("src", "x\n")],
+      ["g", { ...cachedResult("g", "passed"), gate: { passed: true, onFalse: "continue" } }],
+      ["after-gate", cachedResult("after-gate", "cached")],
+      ["quotes", cachedResult("quotes", "decision stale")],
+    ]);
+    const events: WorkflowEvent[] = [];
+    const approving: WorkflowDeps = {
+      ...deps(),
+      requestApproval: async () => ({ approved: true }),
+    };
+    for await (const ev of runWorkflow(spec, { input: "task", cache }, approving)) events.push(ev);
+
+    expect(stepDone(events, "after-gate").cached).toBe(true);
+    expect(stepDone(events, "quotes").cached).toBe(false);
+  });
 });
