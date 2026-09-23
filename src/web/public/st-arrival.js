@@ -102,11 +102,13 @@
    * What became of this run's worktrees, from the server's own look at them —
    * the client cannot tell by itself: a step that finished ok merged nothing,
    * and a run that changed nothing has its worktrees reclaimed as it ends.
-   * Fetched once per run; the record is written just after the run's final
-   * frame, so a miss is retried briefly before giving up.
+   * Fetched once per run, after its terminal status frame: the record is
+   * written around then (by another process, for a detached run), so a miss
+   * is retried for a while before giving up.
    */
   function loadArrivalWorktrees(runId) {
-    if (!runId || (S.arrivalWorktrees && S.arrivalWorktrees.runId === runId)) return;
+    if (!runId || !S.runStatus) return;
+    if (S.arrivalWorktrees && S.arrivalWorktrees.runId === runId) return;
     var entry = { runId: runId, pending: true };
     S.arrivalWorktrees = entry;
     var attempt = function (left) {
@@ -126,7 +128,7 @@
         ST.render();
       });
     };
-    attempt(3);
+    attempt(10);
   }
 
   /** Step ids an in-run `merge` step landed (its `from` sources, when it succeeded). */

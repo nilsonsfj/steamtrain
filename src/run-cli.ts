@@ -857,6 +857,7 @@ export async function runDetachedRunner(
     cwd,
     runId,
     fresh: Boolean(launch.fresh),
+    priorOwner: priorOwnerWork(await store.readEvents(runId).catch(() => [])),
     source: "cli-detached",
     detached: true,
     registerLiveRun: false,
@@ -878,6 +879,64 @@ export async function runDetachedRunner(
   return driven.code;
 }
 
+/** What a handed-off run's previous owner already did, read back from its events. */
+export interface PriorOwnerWork {
+  /** When the run started — the previous owner's `workflow_start`. */
+  startedAt?: number;
+  /** Steps (and fan-out children) the previous owner ran itself, not from cache. */
+  ran: Set<string>;
+}
+
+/**
+ * A mid-run detach (TUI/web) re-drives the run under the same id in a new
+ * process, and the steps the previous owner already finished replay from the
+ * step cache. They are this run's own work, not an earlier run's: reported as
+ * cached they bill $0 and read "reused a cached result", so a run that spent
+ * $0.07 recorded $0.01. Read back from the events the previous owner flushed
+ * before handing off; a `--detach` launch has none.
+ */
+export function priorOwnerWork(events: readonly WorkflowEvent[]): PriorOwnerWork {
+  const ran = new Set<string>();
+  let startedAt: number | undefined;
+  for (const event of events) {
+    if (event.kind === "workflow_start" && startedAt === undefined) startedAt = event.ts;
+    if (event.kind === "step_done" && !event.cached && event.result.ok) ran.add(event.stepId);
+  }
+  return { startedAt, ran };
+}
+
+/**
+ * Rewrites a handed-off run's events as its own work (see {@link priorOwnerWork}):
+ * the previous owner's steps are not cached replays, the run started when the
+ * previous owner started it, and the final results carry the spend the engine
+ * zeroes for a replay. Identity when there was no previous owner.
+ */
+export function ownWorkRewriter(
+  prior: PriorOwnerWork | undefined,
+): (event: WorkflowEvent) => WorkflowEvent {
+  if (!prior || (prior.ran.size === 0 && prior.startedAt === undefined)) return (event) => event;
+  const replayed = new Map<string, StepResult>();
+  const restore = (result: StepResult): StepResult => {
+    const own = replayed.get(result.stepId);
+    const children = result.childResults?.map(restore);
+    if (own) return { ...result, costUsd: own.costUsd, tokens: own.tokens, childResults: children };
+    return children ? { ...result, childResults: children } : result;
+  };
+  return (event) => {
+    if (event.kind === "workflow_start" && prior.startedAt !== undefined) {
+      return { ...event, ts: prior.startedAt };
+    }
+    if (event.kind === "step_done" && event.cached && prior.ran.has(event.stepId)) {
+      replayed.set(event.stepId, event.result);
+      return { ...event, cached: false };
+    }
+    if (event.kind === "workflow_done" && replayed.size > 0) {
+      return { ...event, results: event.results.map(restore) };
+    }
+    return event;
+  };
+}
+
 interface DriveWorkflowRunOptions {
   orchestrator: Orchestrator;
   config: SteamtrainConfig;
@@ -889,6 +948,8 @@ interface DriveWorkflowRunOptions {
   runId: string;
   fresh: boolean;
   seed?: Map<string, StepResult>;
+  /** What the run's previous owner did before a mid-run handoff; see {@link priorOwnerWork}. */
+  priorOwner?: PriorOwnerWork;
   source: LiveRunSource;
   detached: boolean;
   /** Create the live-run entry here (foreground); detached parents pre-create it. */
@@ -1012,6 +1073,7 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<Drive
   timeoutTimer?.unref?.();
 
   const publisher = createLiveRunPublisher(store, runId);
+  const asOwnWork = ownWorkRewriter(options.priorOwner);
   // Run notifications (bell / desktop / webhook) per the `notify` config —
   // this process owns the run, so it is the one that pings.
   const notifier = createNotifier(config.notify);
@@ -1019,7 +1081,7 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<Drive
   let ok = false;
   let budgetExceeded = false;
   try {
-    for await (const event of orchestrator.runWorkflow(
+    for await (const replayed of orchestrator.runWorkflow(
       name,
       input,
       ac.signal,
@@ -1035,6 +1097,7 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<Drive
       control,
       options.humanInput,
     )) {
+      const event = asOwnWork(replayed);
       recorder.handle(event);
       publisher.event(event);
       notifyWorkflowEvent(notifier, notifyMeta, event);

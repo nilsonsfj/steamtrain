@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { printHumanEvent } from "../src/run-cli";
+import { ownWorkRewriter, printHumanEvent, priorOwnerWork } from "../src/run-cli";
 import { describeIssue } from "../src/util/zod-issue";
 import type { WorkflowEvent } from "../src/workflow";
 
@@ -64,5 +64,56 @@ describe("describeIssue", () => {
     ).toBe("workflows.x.phases.0.title: Required");
     expect(describeIssue({ path: [], message: "Expected object" })).toBe("config: Expected object");
     expect(describeIssue(undefined)).toBe("schema error");
+  });
+});
+
+describe("a mid-run handoff keeps the run's own work", () => {
+  const stepDone = (stepId: string, cached: boolean, costUsd: number): WorkflowEvent => ({
+    kind: "step_done",
+    phaseId: "a",
+    stepId,
+    result: { stepId, ok: true, output: "", durationMs: 1, costUsd },
+    cached,
+    ts,
+  });
+
+  it("reads what the previous owner ran itself, and when it started", () => {
+    const prior = priorOwnerWork([
+      { kind: "workflow_start", name: "w", phaseCount: 1, stepCount: 3, ts: 1000 },
+      stepDone("planner", false, 0.01),
+      stepDone("from-an-earlier-run", true, 0.02),
+    ]);
+    expect(prior.startedAt).toBe(1000);
+    expect([...prior.ran]).toEqual(["planner"]);
+  });
+
+  it("reports the previous owner's steps as this run's, spend included", () => {
+    const own = ownWorkRewriter({ startedAt: 1000, ran: new Set(["planner"]) });
+    expect(
+      own({ kind: "workflow_start", name: "w", phaseCount: 1, stepCount: 2, ts: 5000 }),
+    ).toMatchObject({
+      ts: 1000,
+    });
+    expect(own(stepDone("planner", true, 0.01))).toMatchObject({ cached: false });
+    // A step replayed from an earlier run's cache stays a replay.
+    expect(own(stepDone("older", true, 0.02))).toMatchObject({ cached: true });
+    // The engine zeroes a replay's spend in its final results; the handed-off
+    // step's spend is restored, the earlier run's replay stays at $0.
+    const done = own({
+      kind: "workflow_done",
+      ok: true,
+      results: [
+        { stepId: "planner", ok: true, output: "", durationMs: 1, costUsd: 0, tokens: {} },
+        { stepId: "older", ok: true, output: "", durationMs: 1, costUsd: 0, tokens: {} },
+      ],
+      ts,
+    });
+    expect(done.kind === "workflow_done" && done.results.map((r) => r.costUsd)).toEqual([0.01, 0]);
+  });
+
+  it("changes nothing for a run that was not handed off", () => {
+    const own = ownWorkRewriter(priorOwnerWork([]));
+    const event = stepDone("planner", true, 0.01);
+    expect(own(event)).toBe(event);
   });
 });
