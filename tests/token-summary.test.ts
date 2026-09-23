@@ -56,6 +56,12 @@ describe.each([
     expect(summary({ input: 10, output: 5 })).toBe("15 tok (in 10 · out 5)");
   });
 
+  it("drops reasoning reported without any output, as the total does", () => {
+    // Inconsistent data under the invariant; "out 0 incl. 50 reasoning" would
+    // read worse than leaving it out.
+    expect(summary({ input: 10, reasoning: 50 })).toBe("10 tok (in 10)");
+  });
+
   it("is empty with nothing billed", () => {
     expect(summary(undefined)).toBe("");
     expect(summary({ reasoning: 5 })).toBe("");
