@@ -74,7 +74,11 @@
     fingerprint: "",
     // Which full-receipt step lines have their recorded output open, keyed
     // "<runId>:<stepId>" so opening one on one run says nothing about another.
-    receiptOpen: {}
+    receiptOpen: {},
+    // Last unhandled apiAuth failure while this page is up. The cockpit banner
+    // is hidden here, so the centre pane repeats it with the same mbanner the
+    // receipt already uses for a recorded error.
+    failure: null
   };
 
   // Per-step worktree patches, fetched lazily by the full-receipt view and
@@ -161,6 +165,14 @@
   /** Router hook: stop polling when the page is hidden (it is never unmounted). */
   function onLeave() {
     stopPoll();
+    R.failure = null;
+  }
+
+  /** Visible copy of an unhandled request failure. Same text the cockpit banner got. */
+  function noteFailure(text) {
+    if (S.page !== "runs" || !text || R.failure === text) return;
+    R.failure = text;
+    if (R.mount) paint();
   }
 
   function startPoll() {
@@ -584,6 +596,7 @@
 
   function buildMain() {
     var main = h("section", { class: "runs-main" });
+    if (R.failure) main.appendChild(h("div", { class: "mbanner show err", text: R.failure }));
     if (R.view === "receipt" && R.record) {
       main.appendChild(buildReceiptHead());
       var full = h("div", { class: "runs-full" });
@@ -1118,6 +1131,14 @@
   function notify(text, kind) {
     ST.announce(text);
     if (ST.run && ST.run.setBanner) ST.run.setBanner(text, kind);
+    // Clear / delete already catch, so the shared apiAuth banner does not also
+    // fire. Repeat an error here or the hidden cockpit banner is all they get.
+    // Any other notice replaces the cockpit banner, so it retires this copy too.
+    if (kind === "err") noteFailure(text);
+    else if (R.failure) {
+      R.failure = null;
+      if (R.mount) paint();
+    }
   }
 
   function copyRunId(id) {
@@ -1731,6 +1752,7 @@
 
   ST.runs = {
     handleKey: handleKey,
+    noteFailure: noteFailure,
     onLeave: onLeave,
     open: open,
     render: render,

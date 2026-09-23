@@ -172,6 +172,8 @@ interface Mounted {
   clickStep: (stepId: string) => Promise<void>;
   clickButton: (label: string) => Promise<void>;
   press: (key: string) => boolean;
+  /** The page's visible copy of an unhandled apiAuth failure. */
+  noteFailure: (text: string) => void;
 }
 
 /**
@@ -305,6 +307,7 @@ async function mountRuns(opts: {
   const runs = ST.runs as {
     render: (c: StubEl, id?: string) => void;
     handleKey: (e: unknown) => boolean;
+    noteFailure: (text: string) => void;
   };
   runs.render(root, opts.selected);
   // history + live fetch, then the selected run's full record.
@@ -352,6 +355,7 @@ async function mountRuns(opts: {
       for (let i = 0; i < 6; i++) await Promise.resolve();
     },
     press: (key: string) => runs.handleKey({ key, target: null, preventDefault: () => {} }),
+    noteFailure: (text: string) => runs.noteFailure(text),
   };
 }
 
@@ -973,6 +977,26 @@ describe("runs page: destructive actions", () => {
     await page.clickButton("Delete");
     expect(page.rows()).toHaveLength(0);
     expect(page.receipt()).toContain("No run selected");
+  });
+
+  // The cockpit banner is hidden on this page. An unhandled request failure
+  // (prune, re-run) has to land in the centre pane or the click looks dead.
+  it("shows an unhandled request failure in the centre pane", async () => {
+    const page = await mountRuns({ runs: [record()] });
+    page.noteFailure("Request failed: Failed to fetch");
+    expect(page.main()).toContain("Request failed: Failed to fetch");
+    page.noteFailure("Request failed: Failed to fetch");
+    expect(page.main()).toContain("Request failed: Failed to fetch");
+  });
+
+  it("drops the failure copy once a later action succeeds", async () => {
+    const page = await mountRuns({ runs: [record()], detail: { ...record(), phases: [] } });
+    page.noteFailure("Request failed: Failed to fetch");
+    await page.clickRow(0);
+    await page.clickButton("Full receipt");
+    await page.clickButton("Delete");
+    expect(page.said.join(" ")).toContain("Deleted run");
+    expect(page.main()).not.toContain("Request failed");
   });
 });
 
