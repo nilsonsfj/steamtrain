@@ -1270,13 +1270,10 @@ export async function runAttachCommand(
     for await (const event of store.tailEvents(runId, { signal: ac.signal })) {
       if (json) out(`${JSON.stringify(event)}\n`);
       else if (event.kind === "workflow_done") done = event;
-      else {
-        // A cancel request is a file every surface writes, so a viewer can
-        // see it too — and not blame the steps that cancel takes down.
-        const failed = event.kind === "step_done" && !event.result.ok;
-        const canceled = failed && (await store.cancelRequested(runId).catch(() => false));
-        printHumanEvent(event, out, { canceled });
-      }
+      // Steps the cancel took down carry `interrupted`, which is what keeps
+      // their why-line quiet. A run-wide cancel flag would also silence a
+      // step that genuinely failed before the cancel when attaching late.
+      else printHumanEvent(event, out);
       if (!json && event.kind === "approval_pending") {
         out(`     decide with: steamtrain workflow approve ${runId} --step ${event.stepId}\n`);
       }
@@ -2020,12 +2017,15 @@ export function printRunSummary(
   out("\nsummary\n");
   let okCount = 0;
   let failCount = 0;
+  // Taken down by the run's cancel or timeout: stopped, not broken.
+  let interruptedCount = 0;
   let totalCost = 0;
   let totalMs = 0;
   for (const result of results) {
     if (result.childResults?.length) continue; // children are listed individually
-    const status = result.ok ? "ok  " : "fail";
+    const status = result.ok ? "ok  " : result.interrupted ? "stop" : "fail";
     if (result.ok) okCount += 1;
+    else if (result.interrupted) interruptedCount += 1;
     else failCount += 1;
     const cost = result.costUsd ?? 0;
     totalCost += cost;
@@ -2043,6 +2043,7 @@ export function printRunSummary(
   const totals = [
     `${okCount} ok`,
     failCount > 0 ? `${failCount} failed` : undefined,
+    interruptedCount > 0 ? `${interruptedCount} interrupted` : undefined,
     totalCost > 0 ? `$${totalCost.toFixed(4)}` : undefined,
     totalTokens(grandTokens) > 0 ? `${formatTokens(totalTokens(grandTokens))} tok` : undefined,
     `${(totalMs / 1000).toFixed(1)}s total`,

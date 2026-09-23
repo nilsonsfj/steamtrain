@@ -445,6 +445,7 @@
   function arrivalState(report) {
     if (S.runStatus === "canceled") return { text: "canceled", cls: " stopped" };
     if (S.runStatus === "budget-exceeded") return { text: "budget reached", cls: " failed" };
+    if (S.runStatus === "error") return { text: "failed", cls: " failed" };
     // The final status frame lands just after the last event: until then a
     // run whose only casualties were interrupted is "stopped", not failed.
     if (!S.runStatus && !report.receipt.ok && !report.receipt.failCount && report.receipt.interruptedCount) {

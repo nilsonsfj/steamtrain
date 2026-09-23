@@ -542,9 +542,13 @@ function leafResults(state: WorkflowState): ArrivalStepResult[] {
  * beats a hero that says nothing about why the run stopped.
  */
 function rootFailureLines(steps: StepState[]): string[] {
-  const failed = steps.filter((s) => s.result && !s.result.ok && !s.result.skipped);
+  const notOk = steps.filter((s) => s.result && !s.result.ok && !s.result.skipped);
+  // A step the run's cancel took down did not fail: it is no line of blame.
+  const failed = notOk.filter((s) => !s.result?.interrupted);
   const roots = failed.filter((s) => !isCascadeVictim(s.result));
-  const shown = roots.length > 0 ? roots : failed;
+  // With no root, fall back to the victims — unless the run was simply
+  // stopped, in which case there is nothing to blame at all.
+  const shown = roots.length > 0 ? roots : notOk.length > failed.length ? [] : failed;
   return shown.map((s) => {
     const firstErrLine = (s.result?.error ?? "failed").split("\n", 1)[0]?.trim() || "failed";
     const capped = firstErrLine.length > 200 ? `${firstErrLine.slice(0, 199)}…` : firstErrLine;

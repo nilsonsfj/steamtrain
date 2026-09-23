@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ownWorkRewriter, printHumanEvent, priorOwnerWork } from "../src/run-cli";
+import { ownWorkRewriter, printHumanEvent, printRunSummary, priorOwnerWork } from "../src/run-cli";
 import { describeIssue } from "../src/util/zod-issue";
 import type { WorkflowEvent } from "../src/workflow";
 
@@ -55,6 +55,21 @@ describe("printHumanEvent", () => {
     if (interrupted.kind === "step_done") interrupted.result.interrupted = true;
     printHumanEvent(interrupted, out);
     expect(text()).toBe("  fail s1\n");
+  });
+
+  it("lists a step the cancel took down as stopped in the summary, not failed", () => {
+    const { out, text } = capture();
+    printRunSummary(
+      [
+        { stepId: "a", ok: true, output: "", durationMs: 1000 },
+        { stepId: "b", ok: false, output: "", durationMs: 500, interrupted: true, error: "x" },
+        { stepId: "c", ok: false, output: "", durationMs: 500, error: "boom" },
+      ],
+      out,
+    );
+    expect(text()).toContain("  stop b ");
+    expect(text()).toContain("  fail c ");
+    expect(text()).toContain("── 1 ok · 1 failed · 1 interrupted");
   });
 
   it("says a timed-out run timed out", () => {

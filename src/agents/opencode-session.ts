@@ -38,6 +38,9 @@ interface ExportedSession {
  * session, message and part id is renewed first (keeping each id's time
  * prefix, which is what OpenCode sorts on). The source session is untouched.
  * Also used for MiMo, whose CLI is an OpenCode fork with the same commands.
+ *
+ * Every resume pays one full `export`, even when no copy is needed: the CLI
+ * has no cheaper way to say which directory a session belongs to.
  */
 export async function sessionForDirectory(
   binary: string,

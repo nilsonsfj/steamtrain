@@ -58,6 +58,8 @@ describe("arrival report: interrupted steps", () => {
       expect.objectContaining({ stepId: "b", severity: "high", what: "b was interrupted" }),
     ]);
     expect(arrivalRootCause(state)).toMatchObject({ stepId: "b", interrupted: true });
+    // Nor does the hero open with a line blaming it.
+    expect(report?.hero).not.toContain("✗ b");
   });
 
   it("still names a step that broke on its own as the root cause", () => {
@@ -66,6 +68,9 @@ describe("arrival report: interrupted steps", () => {
       b: { ok: false, error: "command exited with code 1" },
     });
     expect(arrivalRootCause(state)).toMatchObject({ stepId: "b", interrupted: false });
+    const hero = buildArrivalReport(state)?.hero ?? "";
+    expect(hero).toContain("✗ b: command exited with code 1");
+    expect(hero).not.toContain("✗ a");
     expect(buildArrivalReport(state)?.receipt).toMatchObject({ failCount: 1, interruptedCount: 1 });
   });
 });

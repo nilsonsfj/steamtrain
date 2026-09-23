@@ -530,10 +530,10 @@
     if (!expectRunId) S.recentRuns = [];
     S.recentRunsFor = name;
     // Like the arrival page's worktree fetch: a 5xx or a dropped request is
-    // worth another try while waiting on a run's record; auth is not.
+    // worth another try; auth is not.
     var attempt = function (left) {
       var again = function () {
-        if (expectRunId && left > 0) setTimeout(function () { attempt(left - 1); }, 1000);
+        if (left > 0) setTimeout(function () { attempt(left - 1); }, 1000);
       };
       ST.apiAuth("GET", "/api/history").then(function (r) {
         if (request !== recentRequest || S.selected !== name) return;

@@ -1059,9 +1059,10 @@ var SteamtrainReducer = (() => {
     return out.filter((r) => !r.childResults?.length);
   }
   function rootFailureLines(steps) {
-    const failed = steps.filter((s) => s.result && !s.result.ok && !s.result.skipped);
+    const notOk = steps.filter((s) => s.result && !s.result.ok && !s.result.skipped);
+    const failed = notOk.filter((s) => !s.result?.interrupted);
     const roots = failed.filter((s) => !isCascadeVictim(s.result));
-    const shown = roots.length > 0 ? roots : failed;
+    const shown = roots.length > 0 ? roots : notOk.length > failed.length ? [] : failed;
     return shown.map((s) => {
       const firstErrLine = (s.result?.error ?? "failed").split("\n", 1)[0]?.trim() || "failed";
       const capped = firstErrLine.length > 200 ? `${firstErrLine.slice(0, 199)}\u2026` : firstErrLine;
