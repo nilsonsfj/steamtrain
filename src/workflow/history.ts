@@ -18,7 +18,11 @@ import type {
  * saved run can be replayed into the existing `WorkflowView` components.
  */
 
-export const RUN_RECORD_VERSION = 1;
+/**
+ * 2: steps a canceled run took down carry `result.interrupted` (the engine
+ * sets it; v1 records are migrated on read, see history-store).
+ */
+export const RUN_RECORD_VERSION = 2;
 /** Cap stored per-step output so a single record can't grow unbounded. */
 export const MAX_STEP_TEXT = 20_000;
 
