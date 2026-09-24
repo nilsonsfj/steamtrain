@@ -128,6 +128,7 @@ export class StubEl {
     return c;
   }
   removeChild(c: StubEl): StubEl {
+    if (c.parentNode !== this) throw new Error("stub-dom: removeChild's node is not a child");
     this.children = this.children.filter((k) => k !== c);
     c.parentNode = null;
     return c;

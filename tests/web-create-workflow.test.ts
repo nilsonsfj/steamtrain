@@ -228,6 +228,7 @@ describe("new-workflow sheet", () => {
 
   it("copies the source spec under the new name for Duplicate", async () => {
     const sheet = await openSheet();
+    expect(sheet.overlay.classList.contains("show")).toBe(true);
     click(sheet.card("Duplicate"));
     // The name is derived from the source until the reader types one.
     expect(sheet.nameInput().value).toBe("bug-hunt-copy");
@@ -242,6 +243,7 @@ describe("new-workflow sheet", () => {
 
   it("copies a template under a free name for From template", async () => {
     const sheet = await openSheet();
+    expect(sheet.overlay.classList.contains("show")).toBe(true);
     click(sheet.card("From"));
     // The template's own name is taken (it is the bundled workflow), so the
     // sheet proposes the next free one.

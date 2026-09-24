@@ -41,10 +41,11 @@ describe("stub DOM", () => {
     expect(document.getElementById("runsPage")).toBe(pane);
   });
 
-  it("refuses to insert before a node that is not a child", () => {
+  it("refuses to insert before, or remove, a node that is not a child", () => {
     const { h } = createDom();
     const parent = h("div", null, h("span"));
     expect(() => parent.insertBefore(h("b"), h("i"))).toThrow(/not a child/);
+    expect(() => parent.removeChild(h("i"))).toThrow(/not a child/);
     expect(parent.children).toHaveLength(1);
   });
 
