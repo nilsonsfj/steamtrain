@@ -94,7 +94,7 @@ describe("live-run store human inputs", () => {
       ts: 1,
     };
     publisher.event(pendingEvent);
-    await new Promise((r) => setTimeout(r, 100));
+    await publisher.flush();
     let meta = await store.get("run-1");
     expect(meta?.pendingInputs).toHaveLength(1);
     expect(meta?.pendingInputs?.[0]).toMatchObject({
@@ -109,7 +109,7 @@ describe("live-run store human inputs", () => {
 
     // A re-ask supersedes rather than stacking.
     publisher.event({ ...pendingEvent, attempt: 2, ts: 2 });
-    await new Promise((r) => setTimeout(r, 100));
+    await publisher.flush();
     meta = await store.get("run-1");
     expect(meta?.pendingInputs).toHaveLength(1);
     expect(meta?.pendingInputs?.[0]?.attempt).toBe(2);
@@ -122,7 +122,7 @@ describe("live-run store human inputs", () => {
       origin: "human-step",
       ts: 3,
     });
-    await new Promise((r) => setTimeout(r, 100));
+    await publisher.flush();
     meta = await store.get("run-1");
     expect(meta?.pendingInputs).toHaveLength(0);
 
