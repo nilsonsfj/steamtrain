@@ -6,8 +6,9 @@
  * nothing to sit in front of: it blocks the main thread, so a quit in progress
  * never finishes and only a force-kill ends the process (#266). That is not a
  * hypothetical. Electron throws one of its own during teardown (seen on 33,
- * and the code is unchanged through 44): its `BrowserWindow` visibility listener can run on a `hide` that arrives after
- * the window is destroyed, and fails with "Object has been destroyed".
+ * and the code is unchanged through 44): its `BrowserWindow` visibility
+ * listener can run on a `hide` that arrives after the window is destroyed,
+ * and fails with "Object has been destroyed".
  *
  * So every uncaught exception is logged, and the box is dropped exactly where
  * it would strand the user: during a quit, or once the app's window has gone.

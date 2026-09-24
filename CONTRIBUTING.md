@@ -31,7 +31,7 @@ bun install --frozen-lockfile
 since Electron 42 the ~100 MB platform binary is fetched the first time
 something asks for it (`npm run dev:electron`, the desktop e2e suite). Run
 `bunx install-electron` to fetch it up front, for instance before going
-offline. Nothing outside `electron/` needs it.
+offline. Nothing outside the desktop shell and its e2e suite needs it.
 
 ## Code style
 
