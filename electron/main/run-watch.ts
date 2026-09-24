@@ -18,6 +18,20 @@
 /** How often to ask. Slow enough to be free, fast enough for a dock badge. */
 const POLL_MS = 3_000;
 
+/**
+ * How long a request to the engine may take. An engine that accepts the
+ * connection and never answers would otherwise leave a poll hanging for good,
+ * and a new one piling on every tick.
+ */
+const REQUEST_MS = 5_000;
+
+/**
+ * How long quitting waits on the engine before going on without its answer.
+ * The quit holds the app open while it asks (see `performQuit`), so an engine
+ * that is busy or wedged must not be able to hold it forever.
+ */
+const QUIT_DEADLINE_MS = 2_000;
+
 export interface RunSummary {
   id: string;
   workflow: string;
@@ -67,9 +81,15 @@ export interface RunWatchEvents {
 export interface RunWatch {
   /** Active runs as of the last successful poll. */
   activeCount(): number;
-  /** Active runs, refreshed now — used by the quit dialog, which must not guess. */
+  /**
+   * Active runs, refreshed now — used by the quit dialog, which must not guess.
+   * Falls back to the last poll's count if the engine does not answer in time.
+   */
   refresh(): Promise<number>;
-  /** Cancel everything in flight. Resolves once every request has been answered. */
+  /**
+   * Cancel everything in flight. Resolves once every request has been answered,
+   * or the quit deadline has passed.
+   */
   cancelActive(): Promise<void>;
   stop(): void;
 }
@@ -82,10 +102,12 @@ export interface StartRunWatchOptions extends RunWatchEvents {
   /** Injected for tests. */
   cancelRun?: (origin: string, id: string) => Promise<void>;
   intervalMs?: number;
+  /** How long `refresh` and each step of `cancelActive` wait. Injected for tests. */
+  deadlineMs?: number;
 }
 
 async function defaultFetchRuns(origin: string): Promise<RunSummary[]> {
-  const res = await fetch(`${origin}/api/runs`);
+  const res = await fetch(`${origin}/api/runs`, { signal: AbortSignal.timeout(REQUEST_MS) });
   if (!res.ok) throw new Error(`GET /api/runs -> ${res.status}`);
   const body: unknown = await res.json();
   const runs = (body as { runs?: unknown }).runs;
@@ -93,7 +115,20 @@ async function defaultFetchRuns(origin: string): Promise<RunSummary[]> {
 }
 
 async function defaultCancelRun(origin: string, id: string): Promise<void> {
-  await fetch(`${origin}/api/runs/${encodeURIComponent(id)}/cancel`, { method: "POST" });
+  await fetch(`${origin}/api/runs/${encodeURIComponent(id)}/cancel`, {
+    method: "POST",
+    signal: AbortSignal.timeout(REQUEST_MS),
+  });
+}
+
+/** What `promise` settles to, or `fallback` if it rejects or `ms` passes first. */
+function within<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms);
+    timer.unref?.();
+  });
+  return Promise.race([promise.catch(() => fallback), late]).finally(() => clearTimeout(timer));
 }
 
 /**
@@ -106,6 +141,7 @@ export function startRunWatch(options: StartRunWatchOptions): RunWatch {
     fetchRuns = defaultFetchRuns,
     cancelRun = defaultCancelRun,
     intervalMs = POLL_MS,
+    deadlineMs = QUIT_DEADLINE_MS,
     onActiveCount,
     onFinished,
   } = options;
@@ -142,14 +178,22 @@ export function startRunWatch(options: StartRunWatchOptions): RunWatch {
 
   return {
     activeCount: () => active,
-    refresh: () => poll().catch(() => active),
+    refresh: () => within(poll(), deadlineMs, active),
     async cancelActive(): Promise<void> {
       // From a fresh list, not the snapshot: this runs at quit time, when the
       // last poll may be seconds stale and cancelling the wrong id is silent.
-      const runs = await fetchRuns(origin).catch(() => snapshot);
+      // The snapshot is only the fallback for an engine that does not answer.
+      const runs = await within(fetchRuns(origin), deadlineMs, snapshot);
       // `allSettled`, because one run refusing to cancel must not leave the
       // others running — and the app is quitting either way.
-      await Promise.allSettled(runs.filter(isActive).map((run) => cancelRun(origin, run.id)));
+      const cancels = Promise.allSettled(
+        runs.filter(isActive).map((run) => cancelRun(origin, run.id)),
+      );
+      await within(
+        cancels.then(() => undefined),
+        deadlineMs,
+        undefined,
+      );
     },
     stop: () => {
       stopped = true;

@@ -163,6 +163,45 @@ describe("startRunWatch", () => {
     watch.stop();
   });
 
+  // Quitting waits on these two, with the quit already held open: an engine
+  // that accepts the request and never answers must not keep the app alive.
+  it("answers refresh from the last poll when the engine does not reply in time", async () => {
+    let calls = 0;
+    const watch = startRunWatch({
+      origin: "http://127.0.0.1:1",
+      fetchRuns: () => {
+        calls += 1;
+        return calls === 1 ? Promise.resolve([run("a", "running")]) : new Promise(() => {});
+      },
+      deadlineMs: 20,
+    });
+    await settle();
+    await expect(watch.refresh()).resolves.toBe(1);
+    watch.stop();
+  });
+
+  it("gives up on cancelling when the engine does not reply in time", async () => {
+    const cancelled: string[] = [];
+    let calls = 0;
+    const watch = startRunWatch({
+      origin: "http://127.0.0.1:1",
+      fetchRuns: () => {
+        calls += 1;
+        return calls === 1 ? Promise.resolve([run("a", "running")]) : new Promise(() => {});
+      },
+      // The last snapshot still names the run, so the cancel is still sent.
+      cancelRun: (_origin, id) => {
+        cancelled.push(id);
+        return new Promise(() => {});
+      },
+      deadlineMs: 20,
+    });
+    await settle();
+    await expect(watch.cancelActive()).resolves.toBeUndefined();
+    expect(cancelled).toEqual(["a"]);
+    watch.stop();
+  });
+
   it("stops polling once stopped", async () => {
     vi.useFakeTimers();
     try {
