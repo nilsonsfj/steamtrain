@@ -97,6 +97,8 @@ interface Launched {
   userData: string;
   /** Everything the main process and the forked engine have written so far. */
   output(): string;
+  /** Resolves once the app's output pipes have closed, or after a bound. */
+  drained(): Promise<void>;
 }
 
 const running: Launched[] = [];
@@ -128,7 +130,23 @@ async function launchApp(projectArgument?: string, alsoRecent: string[] = []): P
   child.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk.toString()));
   child.stderr?.on("data", (chunk: Buffer) => chunks.push(chunk.toString()));
 
-  const launched: Launched = { app, project, userData, output: () => chunks.join("") };
+  let pipesClosed = false;
+  const closed = new Promise<void>((done) => child.once("close", () => done()));
+  void closed.then(() => {
+    pipesClosed = true;
+  });
+  const launched: Launched = {
+    app,
+    project,
+    userData,
+    output: () => chunks.join(""),
+    // An exited app's last lines can still be in the pipe; a live one has
+    // nothing more to give yet, so do not wait on it.
+    drained: () =>
+      pipesClosed || child.exitCode === null
+        ? Promise.resolve()
+        : Promise.race([closed, new Promise<void>((done) => setTimeout(done, 2_000))]),
+  };
   running.push(launched);
   return launched;
 }
@@ -167,13 +185,26 @@ test.afterEach(async () => {
   for (const launched of running) {
     // The app's own stdout carries the engine's banner and any stack trace, and
     // is the only useful thing to look at when a launch assertion fails.
+    // Written to a file and attached by path, not as a body: CI uploads
+    // `test-results/`, and only a file lands there whole (the reporter cuts a
+    // body short). The main process logs each quit step, so a quit that hung
+    // shows where.
     if (testInfo.status !== testInfo.expectedStatus) {
-      await testInfo.attach("app-output", {
-        body: launched.output(),
-        contentType: "text/plain",
-      });
+      await launched.drained();
+      const path = testInfo.outputPath("app-output.txt");
+      writeFileSync(path, launched.output());
+      await testInfo.attach("app-output", { path, contentType: "text/plain" });
     }
-    await launched.app.close().catch(() => {});
+    // Bounded, so an app that will not quit fails its own test and not the
+    // next one's setup too.
+    const closed = await Promise.race([
+      launched.app.close().then(
+        () => true,
+        () => true,
+      ),
+      new Promise<false>((done) => setTimeout(() => done(false), 15_000)),
+    ]);
+    if (!closed) launched.app.process().kill("SIGKILL");
   }
   running.length = 0;
 });

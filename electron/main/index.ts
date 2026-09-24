@@ -1,4 +1,4 @@
-import { existsSync, statSync } from "node:fs";
+import { existsSync, statSync, writeSync } from "node:fs";
 import { basename, join } from "node:path";
 import { BrowserWindow, Notification, app, dialog, ipcMain, screen } from "electron";
 import { resolveEntry } from "./entry";
@@ -401,7 +401,22 @@ async function switchProjectFromDock(dir: string): Promise<void> {
   await switchProject(dir);
 }
 
+/**
+ * One line per quit step on stdout. Quitting holds the app open while it tears
+ * the engine down, so a quit that stalls should say which step it stalled in.
+ * Written synchronously: on macOS a write to a stdout pipe is otherwise
+ * asynchronous, and the last steps would be lost when the app exits.
+ */
+function quitLog(step: string): void {
+  try {
+    writeSync(1, `[steamtrain] quit ${new Date().toISOString()}: ${step}\n`);
+  } catch {
+    // No stdout to write to (a packaged app launched from Finder): nothing to say.
+  }
+}
+
 app.on("window-all-closed", () => {
+  quitLog("last window closed");
   // Closing the window quits, on macOS too. The usual macOS convention — stay
   // in the dock, wait for `activate` — assumes a lightweight app that can idle
   // cheaply. This one holds a forked engine serving a project, and leaving that
@@ -414,6 +429,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
+  quitLog("before-quit");
   quitting = true;
 });
 
@@ -422,13 +438,23 @@ app.on("before-quit", () => {
 // deliberately — only the server this app owns is torn down.
 let shutdown: Promise<void> | undefined;
 app.on("will-quit", (event) => {
-  if (!server || shutdown) return;
+  if (!server || shutdown) {
+    quitLog(server ? "will-quit, torn down" : "will-quit, no engine");
+    return;
+  }
+  quitLog("will-quit, tearing down");
   event.preventDefault();
   // The quit is already prevented, so this must reach `app.quit()` on every
   // path — otherwise a failed teardown leaves the app unquittable.
   shutdown = performQuit({
-    askAboutRuns,
+    askAboutRuns: async () => {
+      quitLog("asking about runs");
+      const choice = await askAboutRuns();
+      quitLog(`runs: ${choice}`);
+      return choice;
+    },
     cancelActive: async () => {
+      quitLog("cancelling runs");
       await watch?.cancelActive();
     },
     stopWatch: () => {
@@ -436,10 +462,15 @@ app.on("will-quit", (event) => {
       watch = undefined;
     },
     stopServer: async () => {
+      quitLog("stopping engine");
       await server?.stop();
       server = undefined;
+      quitLog("engine stopped");
     },
-    quit: () => app.quit(),
+    quit: () => {
+      quitLog("quitting");
+      app.quit();
+    },
     onError: (err) => console.error("[steamtrain] shutdown step failed:", err),
   })
     .then((outcome) => {
