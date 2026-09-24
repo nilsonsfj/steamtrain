@@ -280,7 +280,7 @@ test.afterEach(async () => {
       {
         await launched.drained();
         const out = launched.output();
-        const at = out.search(/UNCAUGHT|UNHANDLED REJECTION/);
+        const at = out.search(/uncaught exception in the main process/);
         if (at >= 0) console.log(`\nERROR-SEEN "${testInfo.title}"\n${out.slice(Math.max(0, at - 800), at + 3000)}`);
       }
       if (ms > 4_000 || stuck || testInfo.status !== testInfo.expectedStatus) {
