@@ -146,13 +146,23 @@ async function launchApp(projectArgument?: string, alsoRecent: string[] = []): P
     output: () => chunks.join(""),
     // An exited app's last lines can still be in the pipe; a live one has
     // nothing more to give yet, so do not wait on it.
-    drained: () =>
-      pipesClosed || isRunning(child)
-        ? Promise.resolve()
-        : Promise.race([closed, new Promise<void>((done) => setTimeout(done, 2_000))]),
+    drained: () => (pipesClosed || isRunning(child) ? Promise.resolve() : within(closed, 2_000)),
   };
   running.push(launched);
   return launched;
+}
+
+/** Wait for `promise`, but no longer than `ms`; the timer does not outlive it. */
+async function within(promise: Promise<unknown>, ms: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<void>((done) => {
+    timer = setTimeout(done, ms);
+  });
+  try {
+    await Promise.race([promise, late]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** Neither exited nor killed by a signal. */
@@ -206,27 +216,29 @@ test.afterEach(async () => {
   // that argument be a destructuring pattern, and there is no fixture to take.
   const testInfo = test.info();
   for (const launched of running) {
-    // The app's own stdout carries the engine's banner and any stack trace, and
-    // is the only useful thing to look at when a launch assertion fails.
-    // Written to a file and attached by path, not as a body: CI uploads
-    // `test-results/`, and only a file lands there whole (the reporter cuts a
-    // body short). The main process logs each quit step, so a quit that hung
-    // shows where.
-    if (testInfo.status !== testInfo.expectedStatus) {
-      await launched.drained();
-      const path = testInfo.outputPath("app-output.txt");
-      writeFileSync(path, launched.output());
-      await testInfo.attach("app-output", { path, contentType: "text/plain" });
+    try {
+      // The app's own stdout carries the engine's banner and any stack trace,
+      // and is the only useful thing to look at when a launch assertion fails.
+      // Written to a file and attached by path, not as a body: CI uploads
+      // `test-results/`, and only a file lands there whole (the reporter cuts
+      // a body short). The main process logs each quit step, so a quit that
+      // hung shows where.
+      if (testInfo.status !== testInfo.expectedStatus) {
+        await launched.drained();
+        const path = testInfo.outputPath("app-output.txt");
+        writeFileSync(path, launched.output());
+        await testInfo.attach("app-output", { path, contentType: "text/plain" });
+      }
+    } finally {
+      // Bounded, so an app that will not quit fails its own test and not the
+      // next one's setup too. Whatever close() reported, the process decides:
+      // one still running is killed along with the engine it forked.
+      await within(
+        launched.app.close().catch(() => {}),
+        15_000,
+      );
+      if (isRunning(launched.process)) killWithEngine(launched.process);
     }
-    // Bounded, so an app that will not quit fails its own test and not the
-    // next one's setup too. Whatever close() reported, the process decides:
-    // one still running is killed along with the engine it forked.
-    const child = launched.process;
-    await Promise.race([
-      launched.app.close().catch(() => {}),
-      new Promise<void>((done) => setTimeout(done, 15_000)),
-    ]);
-    if (isRunning(child)) killWithEngine(child);
   }
   running.length = 0;
 });

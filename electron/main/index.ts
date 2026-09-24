@@ -439,7 +439,8 @@ app.on("before-quit", () => {
 let shutdown: Promise<void> | undefined;
 app.on("will-quit", (event) => {
   if (!server || shutdown) {
-    quitLog(server ? "will-quit, torn down" : "will-quit, no engine");
+    // `shutdown` is set once a teardown ran, which also clears `server`.
+    quitLog(shutdown ? "will-quit, torn down" : "will-quit, no engine");
     return;
   }
   quitLog("will-quit, tearing down");
