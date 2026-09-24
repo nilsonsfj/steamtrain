@@ -21,9 +21,9 @@ const POLL_MS = 3_000;
 /**
  * How long a request to the engine may take. An engine that accepts the
  * connection and never answers would otherwise leave a poll hanging for good,
- * and a new one piling on every tick.
+ * and a new one piling on every tick. Under `POLL_MS`, so polls never overlap.
  */
-const REQUEST_MS = 5_000;
+const REQUEST_MS = 2_500;
 
 /**
  * How long quitting waits on the engine before going on without its answer.
