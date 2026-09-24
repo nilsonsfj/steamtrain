@@ -96,6 +96,8 @@ interface Launched {
   project: string;
   /** Electron `userData`, so a test can read back what the app persisted. */
   userData: string;
+  /** The app's process, held from launch: `app.process()` fails once it exits. */
+  process: ChildProcess;
   /** Everything the main process and the forked engine have written so far. */
   output(): string;
   /** Resolves once the app's output pipes have closed, or after a bound. */
@@ -140,6 +142,7 @@ async function launchApp(projectArgument?: string, alsoRecent: string[] = []): P
     app,
     project,
     userData,
+    process: child,
     output: () => chunks.join(""),
     // An exited app's last lines can still be in the pipe; a live one has
     // nothing more to give yet, so do not wait on it.
@@ -218,7 +221,7 @@ test.afterEach(async () => {
     // Bounded, so an app that will not quit fails its own test and not the
     // next one's setup too. Whatever close() reported, the process decides:
     // one still running is killed along with the engine it forked.
-    const child = launched.app.process();
+    const child = launched.process;
     await Promise.race([
       launched.app.close().catch(() => {}),
       new Promise<void>((done) => setTimeout(done, 15_000)),
