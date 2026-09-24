@@ -7,6 +7,16 @@ import { type ProcessLine, runProcessLines } from "../src/agents/spawn";
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
+/** Whether a process with this pid still exists. */
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
 async function drain(gen: AsyncGenerator<ProcessLine>): Promise<ProcessLine[]> {
   const lines: ProcessLine[] = [];
   for await (const item of gen) lines.push(item);
@@ -147,22 +157,18 @@ describe("runProcessLines signal handling", () => {
   it("keeps SIGKILL armed after a synthetic timeout exit (SIGTERM-immune child)", async () => {
     // Regression: the generator used to cancel the pending SIGKILL in `finally`
     // after fabricating an exit, so a SIGTERM-immune agent kept writing the
-    // worktree after the step was already marked failed.
+    // worktree after the step was already marked failed. Asserted on the
+    // child's lifetime rather than a heartbeat, which a loaded machine can
+    // starve for longer than the SIGKILL grace.
     const marker = join(tmpdir(), `steamtrain-sigkill-${process.pid}-${Date.now()}`);
     const gen = runProcessLines({
       binary: "node",
       args: [
         "-e",
         `
-          const fs = require("node:fs");
-          const marker = ${JSON.stringify(marker)};
           process.on("SIGTERM", () => {});
-          let n = 0;
-          fs.writeFileSync(marker, "0");
-          setInterval(() => {
-            n += 1;
-            fs.writeFileSync(marker, String(n));
-          }, 50);
+          require("node:fs").writeFileSync(${JSON.stringify(marker)}, String(process.pid));
+          setInterval(() => {}, 1000);
         `,
       ],
       // Long enough for Node to start and install its SIGTERM handler even on
@@ -172,21 +178,23 @@ describe("runProcessLines signal handling", () => {
       idleTimeoutMs: 0,
     });
 
+    let pid = 0;
     try {
       const items = await drain(gen);
       const exit = items.find((i) => i.kind === "exit") as Extract<ProcessLine, { kind: "exit" }>;
       expect(exit.timedOut).toBe(true);
+      // The marker is written after the SIGTERM handler is installed, so a
+      // child that wrote it outlived the SIGTERM the timeout sent.
+      for (let i = 0; i < 50 && !existsSync(marker); i++) await delay(20);
       expect(existsSync(marker), "the child was killed before it started").toBe(true);
+      pid = Number(readFileSync(marker, "utf8"));
+      expect(pid).toBeGreaterThan(0);
 
-      // Heartbeats must stop once SIGKILL fires (~2s grace after SIGTERM).
-      await delay(2800);
-      const afterKill = Number(readFileSync(marker, "utf8"));
-      // It was heartbeating, so a frozen count below means it was killed.
-      expect(afterKill).toBeGreaterThan(0);
-      await delay(400);
-      const later = Number(readFileSync(marker, "utf8"));
-      expect(later).toBe(afterKill);
+      // Ignoring SIGTERM, it dies only if SIGKILL (~2s after SIGTERM) still fires.
+      for (let i = 0; i < 100 && isAlive(pid); i++) await delay(50);
+      expect(isAlive(pid), "the SIGTERM-immune child outlived the SIGKILL grace").toBe(false);
     } finally {
+      if (pid > 0 && isAlive(pid)) process.kill(pid, "SIGKILL");
       try {
         unlinkSync(marker);
       } catch {
