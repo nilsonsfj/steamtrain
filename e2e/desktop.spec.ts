@@ -1,3 +1,4 @@
+import type { ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
@@ -95,8 +96,12 @@ interface Launched {
   project: string;
   /** Electron `userData`, so a test can read back what the app persisted. */
   userData: string;
+  /** The app's process, held from launch: `app.process()` fails once it exits. */
+  process: ChildProcess;
   /** Everything the main process and the forked engine have written so far. */
   output(): string;
+  /** Resolves once the app's output pipes have closed, or after a bound. */
+  drained(): Promise<void>;
 }
 
 const running: Launched[] = [];
@@ -128,9 +133,55 @@ async function launchApp(projectArgument?: string, alsoRecent: string[] = []): P
   child.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk.toString()));
   child.stderr?.on("data", (chunk: Buffer) => chunks.push(chunk.toString()));
 
-  const launched: Launched = { app, project, userData, output: () => chunks.join("") };
+  let pipesClosed = false;
+  const closed = new Promise<void>((done) => child.once("close", () => done()));
+  void closed.then(() => {
+    pipesClosed = true;
+  });
+  const launched: Launched = {
+    app,
+    project,
+    userData,
+    process: child,
+    output: () => chunks.join(""),
+    // An exited app's last lines can still be in the pipe; a live one has
+    // nothing more to give yet, so do not wait on it.
+    drained: () => (pipesClosed || isRunning(child) ? Promise.resolve() : within(closed, 2_000)),
+  };
   running.push(launched);
   return launched;
+}
+
+/** Wait for `promise`, but no longer than `ms`; the timer does not outlive it. */
+async function within(promise: Promise<unknown>, ms: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<void>((done) => {
+    timer = setTimeout(done, ms);
+  });
+  try {
+    await Promise.race([promise, late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Neither exited nor killed by a signal. */
+function isRunning(child: ChildProcess): boolean {
+  return child.exitCode === null && child.signalCode === null;
+}
+
+/**
+ * SIGKILL the app and the engine it forked. Playwright starts the app as a
+ * process group leader, and the fork stays in that group; killing only the
+ * app would leave the engine serving for the rest of the suite.
+ */
+function killWithEngine(child: ChildProcess): void {
+  try {
+    if (child.pid && process.platform !== "win32") process.kill(-child.pid, "SIGKILL");
+    else child.kill("SIGKILL");
+  } catch {
+    child.kill("SIGKILL");
+  }
 }
 
 /** Is anything still listening on this port? */
@@ -165,15 +216,29 @@ test.afterEach(async () => {
   // that argument be a destructuring pattern, and there is no fixture to take.
   const testInfo = test.info();
   for (const launched of running) {
-    // The app's own stdout carries the engine's banner and any stack trace, and
-    // is the only useful thing to look at when a launch assertion fails.
-    if (testInfo.status !== testInfo.expectedStatus) {
-      await testInfo.attach("app-output", {
-        body: launched.output(),
-        contentType: "text/plain",
-      });
+    try {
+      // The app's own stdout carries the engine's banner and any stack trace,
+      // and is the only useful thing to look at when a launch assertion fails.
+      // Written to a file and attached by path, not as a body: CI uploads
+      // `test-results/`, and only a file lands there whole (the reporter cuts
+      // a body short). The main process logs each quit step, so a quit that
+      // hung shows where.
+      if (testInfo.status !== testInfo.expectedStatus) {
+        await launched.drained();
+        const path = testInfo.outputPath("app-output.txt");
+        writeFileSync(path, launched.output());
+        await testInfo.attach("app-output", { path, contentType: "text/plain" });
+      }
+    } finally {
+      // Bounded, so an app that will not quit fails its own test and not the
+      // next one's setup too. Whatever close() reported, the process decides:
+      // one still running is killed along with the engine it forked.
+      await within(
+        launched.app.close().catch(() => {}),
+        15_000,
+      );
+      if (isRunning(launched.process)) killWithEngine(launched.process);
     }
-    await launched.app.close().catch(() => {});
   }
   running.length = 0;
 });
@@ -315,7 +380,9 @@ test("stops the engine and saves its window when it quits", async () => {
   expect(port).toBeGreaterThan(0);
   expect(await portAccepts(port)).toBe(true);
 
-  await app.close();
+  // Bounded like the teardown's close: a quit that stalls fails here, with the
+  // quit trail saved, rather than spending the whole test timeout.
+  await within(app.close(), 15_000);
 
   // The engine is a forked child, so nothing stops it unless `will-quit` gets
   // all the way through — the invariant that shipped broken in M1.
