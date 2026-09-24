@@ -441,9 +441,20 @@ export function useWorkflowRunner({
             // owns the run's record and event stream from here (it replays the
             // cache and continues). Draining the iterator lets the aborted engine
             // unwind cleanly. What the engine changes in the cache as it unwinds
-            // is still saved: the child, spawned once this drain is over, reads
-            // the cache from disk.
+            // is still saved, a step that finishes meanwhile included: the
+            // child, spawned once this drain is over, reads the cache from disk,
+            // and a drain that ends in a throw brings no workflow_done to save it.
             if (handoffRef.current?.committed) {
+              if (event.kind === "step_done") {
+                await persistWorkflowStepDone(
+                  store,
+                  key,
+                  cache,
+                  event.stepId,
+                  event.result,
+                  event.cached,
+                );
+              }
               if (changesCache(event)) await store.save(key, cache);
               continue;
             }

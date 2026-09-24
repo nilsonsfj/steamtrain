@@ -921,9 +921,21 @@ export class WorkflowRunManager {
         // events — the detached child owns the run's record and stream from
         // here. Draining the iterator lets the aborted engine unwind cleanly.
         // What the engine changes in the cache as it unwinds (a spent loop's
-        // released budget) is still saved: the child, spawned only once this
-        // drain is over, reads the cache from disk.
+        // released budget, a step that finishes meanwhile) is still saved: the
+        // child, spawned only once this drain is over, reads the cache from
+        // disk, and a drain that ends in a throw brings no workflow_done to
+        // save it.
         if (run.handoffCommitted) {
+          if (event.kind === "step_done") {
+            await persistWorkflowStepDone(
+              this.cacheStore,
+              key,
+              cache,
+              event.stepId,
+              event.result,
+              event.cached,
+            );
+          }
           if (changesCache(event)) await this.cacheStore.save(key, cache);
           continue;
         }
