@@ -100,6 +100,7 @@ async function switchProject(dir: string): Promise<void> {
     const recents = removeRecent(state.recents, dir);
     persist({ recents, lastWorkflow: pruneLastWorkflow(state.lastWorkflow, recents) });
     refreshMenu();
+    quitLog(`error box: project gone: ${dir}`); // STRESS DIAGNOSTIC
     dialog.showErrorBox(
       "That project is gone",
       `${dir} is no longer a directory. It has been removed from the recent projects list.`,
@@ -231,6 +232,7 @@ async function openProject(cwd: string): Promise<void> {
 /** Report a boot failure in a dialog — there may be no window to render into. */
 function reportFatal(err: unknown): void {
   const detail = err instanceof Error ? err.message : String(err);
+  quitLog(`error box: could not start: ${detail}`); // STRESS DIAGNOSTIC
   dialog.showErrorBox("steamtrain could not start", detail);
 }
 
@@ -258,6 +260,7 @@ async function askAboutRuns(): Promise<QuitChoice> {
   // is not: closing the window is itself a way to quit, and that path has to
   // reach the same question rather than silently taking the default.
   const parent = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+  quitLog(`prompt: ${active} active, parent=${Boolean(parent)}`); // STRESS DIAGNOSTIC
   const { response } = await (parent
     ? dialog.showMessageBox(parent, options)
     : dialog.showMessageBox(options));

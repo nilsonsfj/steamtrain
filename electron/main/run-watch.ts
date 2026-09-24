@@ -15,6 +15,8 @@
  * that ever changes, this is the code that breaks.
  */
 
+import { writeSync } from "node:fs";
+
 /** How often to ask. Slow enough to be free, fast enough for a dock badge. */
 const POLL_MS = 3_000;
 
@@ -157,6 +159,12 @@ export function startRunWatch(options: StartRunWatchOptions): RunWatch {
     const finished = finishedBetween(snapshot, runs);
     snapshot = runs;
     const count = runs.filter(isActive).length;
+    // STRESS DIAGNOSTIC (not for merge).
+    if (count > 0 || count !== active) {
+      try {
+        writeSync(1, `[steamtrain] watch ${new Date().toISOString()}: ${count} active of ${runs.length}: ${JSON.stringify(runs).slice(0, 600)}\n`);
+      } catch {}
+    }
     if (count !== active) {
       active = count;
       onActiveCount?.(count);
