@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { WorkflowEvent } from "../src/workflow/events";
 import { createWorkflowHistoryStore } from "../src/workflow/history-store";
 import {
@@ -318,7 +318,8 @@ describe("run queue", () => {
       pollMs: 5,
       onQueued: (position) => positions.push(position),
     });
-    await new Promise((r) => setTimeout(r, 30));
+    // Queued, and has said so, before a slot frees up.
+    await vi.waitFor(() => expect(positions).not.toHaveLength(0));
     expect((await store.get("c"))?.status).toBe("queued");
     // A slot frees up → c is promoted.
     await store.update("a", { status: "done", endedAt: Date.now() });
@@ -369,6 +370,9 @@ describe("cancel watcher and approvals", () => {
     let fired = 0;
     const dispose = watchRunCancel(store, "run", () => fired++, 10);
     await store.requestCancel("run");
+    await vi.waitFor(() => expect(fired).toBeGreaterThan(0));
+    // The watcher stops polling once it fires; a poll already in flight must
+    // not fire a second time.
     await new Promise((r) => setTimeout(r, 60));
     expect(fired).toBe(1);
     dispose();

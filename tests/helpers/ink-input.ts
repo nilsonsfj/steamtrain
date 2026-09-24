@@ -10,7 +10,17 @@
  *
  * Waiting on the rendered frame does not help: the frame is on screen a whole
  * turn before the listener is attached. So wait for the listener itself.
+ *
+ * The same gap reopens after every keypress that changes state. `useInput`
+ * re-subscribes its handler from a passive effect, so until React flushes that
+ * effect the *previous* render's handler, closed over the previous state, is
+ * the one listening. A `setTimeout(0)` usually outlasts the flush, but React's
+ * scheduler yields under load, and then the next key is handled as if the last
+ * one never happened (a → meant for the provider field landing on the id
+ * field, say). So each write runs inside `act()`, which does not return until
+ * the render and its effects have flushed.
  */
+import { act } from "react";
 
 /** The subset of ink-testing-library's fake stdin these helpers need. */
 export interface TestStdin {
@@ -37,11 +47,31 @@ export async function ready(stdin: TestStdin, maxTurns = 100): Promise<void> {
   throw new Error("Ink never attached its stdin listener");
 }
 
+/**
+ * Send one keypress inside `act()`, so it has been handled, rendered and its
+ * effects flushed before this resolves. The act environment flag is on only for
+ * the duration: left on, React would warn about every update a test does not
+ * drive through here, such as a timer firing inside the component.
+ */
+export async function press(stdin: TestStdin, input: string): Promise<void> {
+  // A key sent before Ink listens is dropped in silence; once mounted this is free.
+  await ready(stdin);
+  const env = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const previous = env.IS_REACT_ACT_ENVIRONMENT;
+  env.IS_REACT_ACT_ENVIRONMENT = true;
+  try {
+    await act(async () => {
+      stdin.write(input);
+    });
+  } finally {
+    env.IS_REACT_ACT_ENVIRONMENT = previous;
+  }
+}
+
 /** Send keypresses in order, letting the component settle after each one. */
 export async function type(stdin: TestStdin, ...inputs: string[]): Promise<void> {
-  await ready(stdin);
   for (const input of inputs) {
-    stdin.write(input);
+    await press(stdin, input);
     await tick();
   }
 }
