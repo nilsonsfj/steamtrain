@@ -175,7 +175,11 @@ export class StubEl {
   removeEventListener(event: string, fn: Listener): void {
     this.listeners[event] = (this.listeners[event] ?? []).filter((f) => f !== fn);
   }
-  /** Call this node's own `event` listeners (no bubbling). */
+  /**
+   * Call this node's own `event` listeners, and no ancestor's. Use `dispatch`
+   * for an event that bubbles in a browser (`click`, `change`, `input`) when
+   * a handler up the tree has to see it.
+   */
   fire(event: string, init: Partial<StubEvent> = {}): void {
     const e: StubEvent = {
       type: event,
@@ -321,8 +325,16 @@ export function createDom(
     body: undefined as unknown as StubEl,
     activeElement: null,
     title: "",
-    getElementById: (id) =>
-      byId[id] ?? descendants(document.body, (n) => n.attrs.id === id)[0] ?? null,
+    // The body, then the detached trees tests register in `byId`: a node a
+    // script names inside a registered modal is as findable as on the page.
+    getElementById: (id) => {
+      if (byId[id]) return byId[id];
+      for (const root of [document.body, ...Object.values(byId)]) {
+        const hit = descendants(root, (n) => n.attrs.id === id)[0];
+        if (hit) return hit;
+      }
+      return null;
+    },
     createElement: (tag) => make(tag, document),
     createTextNode: (text) => {
       const node = make("#text", document);
@@ -460,8 +472,33 @@ function splitTop(text: string, sep: string): string[] {
   return out;
 }
 
+/**
+ * A selector's compounds and `>` combinators, split outside brackets and
+ * parentheses, so `[title="a > b"]` stays one compound.
+ */
+function tokenize(sel: string): string[] {
+  const tokens: string[] = [];
+  let depth = 0;
+  let cur = "";
+  const flush = () => {
+    if (cur) tokens.push(cur);
+    cur = "";
+  };
+  for (const ch of sel) {
+    if (ch === "(" || ch === "[") depth++;
+    else if (ch === ")" || ch === "]") depth--;
+    if (depth === 0 && /\s/.test(ch)) flush();
+    else if (depth === 0 && ch === ">") {
+      flush();
+      tokens.push(">");
+    } else cur += ch;
+  }
+  flush();
+  return tokens;
+}
+
 function parseChain(sel: string): Chain {
-  const tokens = splitTop(sel.replace(/\s*>\s*/g, " > "), " ").filter(Boolean);
+  const tokens = tokenize(sel);
   const chain: Chain = [];
   const unsupported = () => new Error(`stub-dom: unsupported selector "${sel}"`);
   let combinator: " " | ">" = " ";
