@@ -277,6 +277,12 @@ test.afterEach(async () => {
       if (stuck) probeStuck(launched, testInfo.outputPath("stuck-probe.txt"));
       if (stuck) killWithEngine(launched.process);
       // STRESS DIAGNOSTIC (not for merge).
+      {
+        await launched.drained();
+        const out = launched.output();
+        const at = out.search(/UNCAUGHT|UNHANDLED REJECTION/);
+        if (at >= 0) console.log(`\nERROR-SEEN "${testInfo.title}"\n${out.slice(Math.max(0, at - 800), at + 3000)}`);
+      }
       if (ms > 4_000 || stuck || testInfo.status !== testInfo.expectedStatus) {
         await launched.drained();
         console.log(
