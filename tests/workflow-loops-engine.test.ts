@@ -6,9 +6,8 @@ import type { AgentAdapter } from "../src/agents";
 import { initialWorkflowState, workflowReducer } from "../src/tui/workflow-state";
 import type { AgentEvent } from "../src/types/events";
 import {
-  changesCache,
   createWorkflowCacheStore,
-  persistWorkflowStepDone,
+  persistCacheEvent,
   workflowCacheKey,
 } from "../src/workflow/cache-store";
 import { runWorkflow } from "../src/workflow/engine";
@@ -686,10 +685,7 @@ describe("a loop resumed from its cache", () => {
       for await (const e of runWorkflow(spec, { input: "go", cache }, deps, signal)) {
         events.push(e);
         onEvent?.(e);
-        if (e.kind === "step_done") {
-          await persistWorkflowStepDone(store, key, cache, e.stepId, e.result, e.cached);
-        }
-        if (changesCache(e)) await store.save(key, cache);
+        await persistCacheEvent(store, key, cache, e);
       }
       const passes = (phaseId: string) =>
         events.flatMap((e) =>

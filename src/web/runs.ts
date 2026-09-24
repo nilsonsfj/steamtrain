@@ -33,7 +33,6 @@ import {
   acquireRunSlot,
   applyRetryStepFilter,
   applyWorkflowStepOverrides,
-  changesCache,
   completeHandoff,
   createLiveRunPublisher,
   createNotifier,
@@ -44,7 +43,7 @@ import {
   matchApprovalKey,
   newLiveRunMeta,
   notifyWorkflowEvent,
-  persistWorkflowStepDone,
+  persistCacheEvent,
   planRerun,
   planRetryRetarget,
   pruneRunWorktrees,
@@ -926,34 +925,14 @@ export class WorkflowRunManager {
         // disk, and a drain that ends in a throw brings no workflow_done to
         // save it.
         if (run.handoffCommitted) {
-          if (event.kind === "step_done") {
-            await persistWorkflowStepDone(
-              this.cacheStore,
-              key,
-              cache,
-              event.stepId,
-              event.result,
-              event.cached,
-            );
-          }
-          if (changesCache(event)) await this.cacheStore.save(key, cache);
+          await persistCacheEvent(this.cacheStore, key, cache, event);
           continue;
         }
         recorder.handle(event);
         publisher?.event(event);
         notifyWorkflowEvent(this.notifier, notifyMeta, event);
         this.emit(run, JSON.stringify({ type: "event", event }), false);
-        if (event.kind === "step_done") {
-          await persistWorkflowStepDone(
-            this.cacheStore,
-            key,
-            cache,
-            event.stepId,
-            event.result,
-            event.cached,
-          );
-        }
-        if (changesCache(event)) await this.cacheStore.save(key, cache);
+        await persistCacheEvent(this.cacheStore, key, cache, event);
         if (event.kind === "workflow_done") {
           ok = event.ok;
           if (event.budgetExceeded) budgetExceeded = true;
