@@ -233,11 +233,36 @@ test.afterEach(async () => {
       // Bounded, so an app that will not quit fails its own test and not the
       // next one's setup too. Whatever close() reported, the process decides:
       // one still running is killed along with the engine it forked.
+      const began = new Date();
+      let closed = false;
+      let closeError = "";
       await within(
-        launched.app.close().catch(() => {}),
+        launched.app
+          .close()
+          .then(() => {
+            closed = true;
+          })
+          .catch((err: unknown) => {
+            closeError = String(err);
+          }),
         15_000,
       );
-      if (isRunning(launched.process)) killWithEngine(launched.process);
+      const ms = Date.now() - began.getTime();
+      const stuck = isRunning(launched.process);
+      if (stuck) killWithEngine(launched.process);
+      // STRESS DIAGNOSTIC (not for merge).
+      if (ms > 4_000 || stuck || testInfo.status !== testInfo.expectedStatus) {
+        await launched.drained();
+        console.log(
+          `\nCLOSE-SLOW "${testInfo.title}" began=${began.toISOString()} ms=${ms} closed=${closed} error=${closeError || "-"} stuck=${stuck} status=${testInfo.status}\n` +
+            launched
+              .output()
+              .split("\n")
+              .slice(-40)
+              .map((line) => `  | ${line}`)
+              .join("\n"),
+        );
+      }
     }
   }
   running.length = 0;
