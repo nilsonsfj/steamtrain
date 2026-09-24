@@ -99,6 +99,7 @@ describe("a TUI run whose view unmounts", () => {
     );
     expect(runner?.runWorkflow(spec.name, "go")).toBe(true);
     for (let i = 0; i < 100 && !runner?.wf.started; i++) await delay(10);
+    expect(runner?.wf.started).toBe(true);
 
     mountedRef.current = false; // the App goes away while the steps are still running
     finish();
