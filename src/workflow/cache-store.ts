@@ -250,6 +250,25 @@ export async function persistWorkflowStepDone(
   await store.save(key, cache);
 }
 
+/**
+ * Save what `event` means for the on-disk cache: a finished step (see
+ * {@link persistWorkflowStepDone}), or a change the engine already made to the
+ * map (see {@link changesCache}). Every driver's event loop calls this, on
+ * every path, including a handoff's drain, so none of them can save one kind
+ * and forget the other.
+ */
+export async function persistCacheEvent(
+  store: WorkflowCacheStore | undefined,
+  key: WorkflowCacheKey | undefined,
+  cache: Map<string, StepResult>,
+  event: WorkflowEvent,
+): Promise<void> {
+  if (event.kind === "step_done") {
+    await persistWorkflowStepDone(store, key, cache, event.stepId, event.result, event.cached);
+  }
+  if (store && key && changesCache(event)) await store.save(key, cache);
+}
+
 function parseWorkflowCacheFile(file: string, key: WorkflowCacheKey): Map<string, StepResult> {
   let raw: unknown;
   try {

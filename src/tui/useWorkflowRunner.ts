@@ -21,7 +21,6 @@ import {
   WORKFLOW_HISTORY_DIR,
   WORKFLOW_RUNS_DIR,
   acquireRunSlot,
-  changesCache,
   completeHandoff,
   createLiveRunPublisher,
   createLiveRunStore,
@@ -33,7 +32,7 @@ import {
   isTerminalLiveRunStatus,
   newLiveRunMeta,
   notifyWorkflowEvent,
-  persistWorkflowStepDone,
+  persistCacheEvent,
   resolveMaxParallelRuns,
   resolveWorkflowTimeoutSec,
   timeoutMsFromSec,
@@ -441,10 +440,11 @@ export function useWorkflowRunner({
             // owns the run's record and event stream from here (it replays the
             // cache and continues). Draining the iterator lets the aborted engine
             // unwind cleanly. What the engine changes in the cache as it unwinds
-            // is still saved: the child, spawned once this drain is over, reads
-            // the cache from disk.
+            // is still saved, a step that finishes meanwhile included: the
+            // child, spawned once this drain is over, reads the cache from disk,
+            // and a drain that ends in a throw brings no workflow_done to save it.
             if (handoffRef.current?.committed) {
-              if (changesCache(event)) await store.save(key, cache);
+              await persistCacheEvent(store, key, cache, event);
               continue;
             }
             recorder.handle(event);
@@ -454,17 +454,7 @@ export function useWorkflowRunner({
             // Persist even once the view has unmounted, as the web and CLI
             // drivers do: a step that finished is paid for, and a resume must
             // not run it again.
-            if (event.kind === "step_done") {
-              await persistWorkflowStepDone(
-                store,
-                key,
-                cache,
-                event.stepId,
-                event.result,
-                event.cached,
-              );
-            }
-            if (changesCache(event)) await store.save(key, cache);
+            await persistCacheEvent(store, key, cache, event);
             // Keep draining after unmount so every later step_done is cached
             // too; only the view updates stop.
             if (!mountedRef.current) continue;

@@ -269,6 +269,48 @@ describe("web run manager mid-run detach", () => {
     });
   });
 
+  it("caches a step that finishes during the drain, even when the engine then throws", async () => {
+    // With no workflow_done to save the whole map, the step is saved only if
+    // the drain saves it; otherwise the detached child runs it again.
+    const cacheStore = createWorkflowCacheStore(join(root, "cache"));
+    const key = workflowCacheKey("detach-demo", "hi", root, chainSpec);
+    let started = false;
+    const host: WorkflowHost = {
+      listWorkflows: () => ({ [chainSpec.name]: chainSpec }),
+      canDispatchWorkflowSpec: () => ({ ok: true }),
+      runWorkflow: (_name, _input, signal) =>
+        (async function* () {
+          yield { kind: "workflow_start", name: "detach-demo", phaseCount: 2, stepCount: 2, ts: 0 };
+          started = true;
+          while (!signal?.aborted) await delay(5);
+          yield {
+            kind: "step_done",
+            phaseId: "p1",
+            stepId: "a",
+            result: { stepId: "a", ok: true, output: "paid", durationMs: 5, costUsd: 0.5 },
+            cached: false,
+            ts: 1,
+          } as WorkflowEvent;
+          throw new Error("abort cleanup failed");
+        })(),
+    };
+    const manager = new WorkflowRunManager({
+      host,
+      cacheStore,
+      cwd: root,
+      config: { stepTimeoutSec: 60, workflowTimeoutSec: 3600 },
+      liveRuns,
+      detachIo: { projectDir: root },
+    });
+    const runId = manager.start("detach-demo", "hi").runId as string;
+    for (let i = 0; i < 100 && !started; i++) await delay(10);
+    expect(manager.detach(runId)).toEqual({ ok: true });
+    for (let i = 0; i < 200 && manager.get(runId); i++) await delay(10);
+    expect(manager.get(runId)).toBeUndefined();
+
+    expect((await cacheStore.load(key)).get("a")?.output).toBe("paid");
+  });
+
   it("carries a per-session spec override into the handoff (cache stays aligned)", async () => {
     const { host, state } = makeEngineHost();
     const manager = new WorkflowRunManager({

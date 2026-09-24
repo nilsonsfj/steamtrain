@@ -7,7 +7,7 @@ import { useEffect, useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Orchestrator } from "../src/orchestrator";
 import { useWorkflowRunner } from "../src/tui/useWorkflowRunner";
-import type { WorkflowEvent, WorkflowSpec } from "../src/workflow";
+import { type WorkflowEvent, type WorkflowSpec, workflowCacheKey } from "../src/workflow";
 
 type Runner = ReturnType<typeof useWorkflowRunner>;
 const spec: WorkflowSpec = {
@@ -112,6 +112,66 @@ describe("TUI immediate mid-run detach", () => {
       if (!detached) await delay(10);
     }
     expect(detached).toBe(true);
+    view.unmount();
+  });
+
+  it("caches a step that finishes during the drain, even when the engine then throws", async () => {
+    // With no workflow_done to save the whole map, the step is saved only if
+    // the drain saves it; otherwise the detached child runs it again.
+    let activeSignal: AbortSignal | undefined;
+    const orchestrator = {
+      canDispatchWorkflowSpec: () => ({ ok: true }),
+      getConfig: () => ({}),
+      runWorkflow(
+        _name: string,
+        _input: string,
+        signal?: AbortSignal,
+      ): AsyncIterable<WorkflowEvent> {
+        activeSignal = signal;
+        return (async function* () {
+          yield { kind: "workflow_start", name: spec.name, phaseCount: 1, stepCount: 1, ts: 0 };
+          await new Promise<void>((resolve) =>
+            signal?.addEventListener("abort", () => resolve(), { once: true }),
+          );
+          yield {
+            kind: "step_done",
+            phaseId: "p",
+            stepId: "slow",
+            result: { stepId: "slow", ok: true, output: "paid", durationMs: 5, costUsd: 0.5 },
+            cached: false,
+            ts: 1,
+          };
+          throw new Error("abort cleanup failed");
+        })();
+      },
+    } as unknown as Orchestrator;
+
+    let runner: Runner | undefined;
+    const view = render(
+      <Harness
+        cwd={root}
+        orchestrator={orchestrator}
+        onRunner={(next) => {
+          runner = next;
+        }}
+      />,
+    );
+    expect(runner?.runWorkflow(spec.name, "go")).toBe(true);
+    for (let i = 0; i < 100 && !activeSignal; i++) await delay(10);
+    expect(activeSignal).toBeDefined();
+    expect(await runner?.detachRun()).toBeNull();
+
+    let detached = false;
+    for (let i = 0; i < 200 && !detached; i++) {
+      const runs = await runner!.liveRunStoreRef.current.list();
+      detached = runs.some((run) => run.source === "cli-detached" && run.detached);
+      if (!detached) await delay(10);
+    }
+    expect(detached).toBe(true);
+    const cache = await runner!.cacheStoreRef.current.load(
+      workflowCacheKey(spec.name, "go", root, spec),
+    );
+    expect(cache.get("slow")?.output).toBe("paid");
     view.unmount();
   });
 });

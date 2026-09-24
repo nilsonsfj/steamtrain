@@ -12,6 +12,7 @@ import {
   hashWorkflowCacheInput,
   hashWorkflowSpec,
   loadWorkflowCache,
+  persistCacheEvent,
   persistWorkflowStepDone,
   saveWorkflowCache,
   workflowCacheFileName,
@@ -556,6 +557,41 @@ describe("events the drivers save the cache on", () => {
     );
     expect(changesCache({ kind: "workflow_done", ok: false, results: [], ts: 0 })).toBe(true);
     expect(changesCache({ kind: "phase_done", phaseId: "p", ok: true, ts: 0 })).toBe(false);
+  });
+
+  it("saves a finished step and a map the engine changed, through one call", async () => {
+    const root = tempDir();
+    const store = createWorkflowCacheStore(root);
+    const key = workflowCacheKey("wf", "input", root, { name: "wf", phases: [] });
+    const cache = new Map<string, StepResult>();
+
+    const done = (stepId: string, result: StepResult) =>
+      ({ kind: "step_done", phaseId: "p", stepId, result, cached: false, ts: 0 }) as const;
+    await persistCacheEvent(store, key, cache, done("a", sampleResult("a")));
+    await persistCacheEvent(store, key, cache, done("bad", { ...sampleResult("bad"), ok: false }));
+    expect([...(await store.load(key)).keys()]).toEqual(["a"]);
+
+    // The engine drops an entry on its own map, then says so with an event
+    // that changesCache names. An event it does not name (phase_done) must
+    // not flush the drop; workflow_done then does.
+    cache.delete("a");
+    await persistCacheEvent(store, key, cache, {
+      kind: "phase_done",
+      phaseId: "p",
+      ok: true,
+      ts: 0,
+    });
+    expect([...(await store.load(key)).keys()]).toEqual(["a"]);
+    await persistCacheEvent(store, key, cache, {
+      kind: "workflow_done",
+      ok: false,
+      results: [],
+      ts: 0,
+    });
+    expect([...(await store.load(key)).keys()]).toEqual([]);
+
+    // A run with no cache store to save to is not an error.
+    await persistCacheEvent(undefined, key, cache, done("b", sampleResult("b")));
   });
 });
 

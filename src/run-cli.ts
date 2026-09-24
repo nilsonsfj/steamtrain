@@ -33,7 +33,6 @@ import {
   aggregateLeavesByModel,
   applyRetryStepFilter,
   applyWorkflowStepOverrides,
-  changesCache,
   classifyRun,
   createLiveRunPublisher,
   createLiveRunStore,
@@ -60,7 +59,7 @@ import {
   matchPendingInput,
   newLiveRunMeta,
   notifyWorkflowEvent,
-  persistWorkflowStepDone,
+  persistCacheEvent,
   planRerun,
   planTakeover,
   recordTakeover,
@@ -1133,17 +1132,7 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<Drive
       notifyWorkflowEvent(notifier, notifyMeta, event);
       if (options.json) out(`${JSON.stringify(event)}\n`);
       else printHumanEvent(event, out, { canceled: ac.signal.aborted && !timedOut, timedOut });
-      if (event.kind === "step_done") {
-        await persistWorkflowStepDone(
-          cacheStore,
-          key,
-          cache,
-          event.stepId,
-          event.result,
-          event.cached,
-        );
-      }
-      if (changesCache(event)) await cacheStore.save(key, cache);
+      await persistCacheEvent(cacheStore, key, cache, event);
       if (event.kind === "workflow_done") {
         ok = event.ok;
         budgetExceeded = Boolean(event.budgetExceeded);
