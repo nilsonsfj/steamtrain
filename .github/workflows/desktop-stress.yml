@@ -1,0 +1,50 @@
+# TEMPORARY (issue #276, Electron 44): repeat the macOS desktop suite to catch the quit hang.
+name: desktop-stress
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  stress:
+    if: github.head_ref == 'nilsonsfj/electron-44-stress'
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - run: bun install --frozen-lockfile
+
+      - run: bunx install-electron
+
+      - run: |
+          bun run build
+          bun run build:electron
+
+      - name: Dev layout, repeated
+        continue-on-error: true
+        run: bunx playwright test --project=electron --repeat-each=20
+
+      - run: bunx electron-builder --dir --publish never --arm64
+
+      - name: Packaged app, repeated
+        continue-on-error: true
+        run: STEAMTRAIN_E2E_APP="$(ls -d release/mac*/steamtrain.app/Contents/MacOS/steamtrain)" bunx playwright test --project=electron --repeat-each=20 --output=test-results-packaged
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stress-${{ matrix.shard }}
+          path: |
+            test-results/
+            test-results-packaged/
+          if-no-files-found: ignore
+          retention-days: 7
