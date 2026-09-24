@@ -418,6 +418,14 @@ function quitLog(step: string): void {
   }
 }
 
+// STRESS DIAGNOSTIC (not for merge): Electron's default handler shows a modal box.
+process.on("uncaughtException", (err) => {
+  quitLog(`UNCAUGHT: ${err instanceof Error ? err.stack : String(err)}`);
+});
+process.on("unhandledRejection", (err) => {
+  quitLog(`UNHANDLED REJECTION: ${err instanceof Error ? err.stack : String(err)}`);
+});
+
 app.on("window-all-closed", () => {
   quitLog("last window closed");
   // Closing the window quits, on macOS too. The usual macOS convention — stay
