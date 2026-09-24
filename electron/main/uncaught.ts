@@ -5,8 +5,8 @@
  * unwelcome but visible report. Without one, it is an app-modal alert with
  * nothing to sit in front of: it blocks the main thread, so a quit in progress
  * never finishes and only a force-kill ends the process (#266). That is not a
- * hypothetical. Electron 33 throws one of its own during teardown: its
- * `BrowserWindow` visibility listener can run on a `hide` that arrives after
+ * hypothetical. Electron throws one of its own during teardown (seen on 33,
+ * and the code is unchanged through 44): its `BrowserWindow` visibility listener can run on a `hide` that arrives after
  * the window is destroyed, and fails with "Object has been destroyed".
  *
  * So every uncaught exception is logged, and the box is dropped exactly where

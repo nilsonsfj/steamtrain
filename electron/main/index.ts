@@ -170,6 +170,11 @@ function announce(finished: readonly FinishedRun[]): void {
       // Same deep-link shape the engine's own notifications use.
       void mainWindow.loadURL(`${new URL(server.ready.url).origin}/#run-${run.id}`);
     });
+    // Since Electron 42, macOS delivers these through UNNotification, which can
+    // refuse an app without a real signature. Say so rather than drop it silently.
+    notification.on("failed", (_event, error) => {
+      uncaughtDeps.log(`[steamtrain] notification not shown: ${error}`);
+    });
     notification.show();
   }
 }

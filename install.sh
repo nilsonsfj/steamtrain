@@ -362,14 +362,11 @@ fi
 # --- build --------------------------------------------------------------------
 if [ "$DO_BUILD" -eq 1 ]; then
   info "Installing dependencies with bun…"
-  # The build needs devDependencies (tsup, esbuild, typescript), which drags in
-  # electron — and electron's postinstall downloads a ~100 MB platform binary
-  # this CLI install has no use for. Skip that download unless the caller wants
-  # it (building the desktop shell does).
+  # The build needs devDependencies (tsup, esbuild, typescript), which include
+  # electron. Installing it is cheap: electron fetches its ~100 MB binary on
+  # first use, and building the CLI never uses it.
   (
     cd "$SRC_DIR"
-    ELECTRON_SKIP_BINARY_DOWNLOAD="${ELECTRON_SKIP_BINARY_DOWNLOAD:-1}"
-    export ELECTRON_SKIP_BINARY_DOWNLOAD
     bun install
   ) || die "'bun install' failed in ${SRC_DIR}."
 
