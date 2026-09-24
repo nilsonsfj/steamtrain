@@ -160,6 +160,8 @@ describe("runProcessLines signal handling", () => {
     // worktree after the step was already marked failed. Asserted on the
     // child's lifetime rather than a heartbeat, which a loaded machine can
     // starve for longer than the SIGKILL grace.
+    // Windows has no SIGTERM to ignore: kill() there always terminates.
+    if (process.platform === "win32") return;
     const marker = join(tmpdir(), `steamtrain-sigkill-${process.pid}-${Date.now()}`);
     const gen = runProcessLines({
       binary: "node",
@@ -222,7 +224,7 @@ describe("runProcessLines signal handling", () => {
             process.execPath,
             [
               "-e",
-              "process.on('SIGTERM', () => {}); const fs = require('node:fs'); let n = 0; fs.writeFileSync(process.argv[1], '0'); setInterval(() => { n += 1; fs.writeFileSync(process.argv[1], String(n)); }, 50);",
+              "process.on('SIGTERM', () => {}); require('node:fs').writeFileSync(process.argv[1], String(process.pid)); setInterval(() => {}, 1000);",
               marker,
             ],
             { stdio: "ignore" },
@@ -235,28 +237,29 @@ describe("runProcessLines signal handling", () => {
       idleTimeoutMs: 0,
     });
 
+    // The helper writes its pid once it ignores SIGTERM. Asserted on its
+    // lifetime, not a heartbeat that a loaded machine can starve.
     const consumer = drain(gen);
-    const deadline = Date.now() + 5000;
-    while (Date.now() < deadline) {
-      try {
-        readFileSync(marker);
-        break;
-      } catch {
-        await delay(40);
-      }
-    }
-    ac.abort();
-    await consumer;
-
-    await delay(2800);
-    const afterKill = Number(readFileSync(marker, "utf8"));
-    await delay(400);
-    const later = Number(readFileSync(marker, "utf8"));
-    expect(later).toBe(afterKill);
+    for (let i = 0; i < 125 && !existsSync(marker); i++) await delay(40);
+    let helper = 0;
     try {
-      unlinkSync(marker);
-    } catch {
-      // ignore
+      expect(existsSync(marker), "the helper never started").toBe(true);
+      helper = Number(readFileSync(marker, "utf8"));
+      expect(helper).toBeGreaterThan(0);
+      ac.abort();
+      await consumer;
+
+      // Only a kill aimed at the whole group (SIGKILL, ~2s after SIGTERM) reaches it.
+      for (let i = 0; i < 100 && isAlive(helper); i++) await delay(50);
+      expect(isAlive(helper), "the forked helper outlived the group kill").toBe(false);
+    } finally {
+      ac.abort();
+      if (helper > 0 && isAlive(helper)) process.kill(helper, "SIGKILL");
+      try {
+        unlinkSync(marker);
+      } catch {
+        // ignore
+      }
     }
   }, 15_000);
 
