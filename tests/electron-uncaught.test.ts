@@ -1,10 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 import { type UncaughtDeps, handleUncaught } from "../electron/main/uncaught";
 
-function deps(overrides: Partial<UncaughtDeps> = {}) {
+type Spied = UncaughtDeps & {
+  log: ReturnType<typeof vi.fn>;
+  showErrorBox: ReturnType<typeof vi.fn>;
+};
+
+function deps(overrides: Partial<Pick<UncaughtDeps, "quitting" | "windowGone">> = {}): Spied {
   return {
     quitting: () => false,
-    hasWindow: () => true,
+    windowGone: () => false,
     log: vi.fn(),
     showErrorBox: vi.fn(),
     ...overrides,
@@ -26,8 +31,8 @@ describe("handleUncaught", () => {
     expect(d.log).toHaveBeenCalledWith(expect.stringContaining("visibilityChanged"));
   });
 
-  it("never shows one with no window to show it over", () => {
-    const d = deps({ hasWindow: () => false });
+  it("never shows one once the window has gone", () => {
+    const d = deps({ windowGone: () => true });
     handleUncaught(new Error("boom"), d);
     expect(d.showErrorBox).not.toHaveBeenCalled();
     expect(d.log).toHaveBeenCalledWith(expect.stringContaining("boom"));
@@ -41,6 +46,21 @@ describe("handleUncaught", () => {
       "A JavaScript error occurred in the main process",
       expect.stringContaining("boom"),
     );
+  });
+
+  it("only logs an unhandled rejection, as Electron itself only warns", () => {
+    const d = deps();
+    handleUncaught(new Error("ERR_ABORTED"), d, "rejection");
+    expect(d.showErrorBox).not.toHaveBeenCalled();
+    expect(d.log).toHaveBeenCalledWith(expect.stringContaining("unhandled rejection"));
+  });
+
+  it("names an error that has lost its stack", () => {
+    const d = deps();
+    const err = new RangeError("too far");
+    err.stack = undefined;
+    handleUncaught(err, d);
+    expect(d.showErrorBox).toHaveBeenCalledWith(expect.any(String), "RangeError: too far");
   });
 
   it("describes a thrown non-Error", () => {

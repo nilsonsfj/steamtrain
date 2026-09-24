@@ -9,15 +9,18 @@
  * `BrowserWindow` visibility listener can run on a `hide` that arrives after
  * the window is destroyed, and fails with "Object has been destroyed".
  *
- * So every uncaught exception is logged, and the box is kept for the one case
- * where it helps: the app is up, not quitting, and has a window to show it over.
+ * So every uncaught exception is logged, and the box is dropped exactly where
+ * it would strand the user: during a quit, or once the app's window has gone.
+ * Before the first window opens the box stays, as it does in `reportFatal`: at
+ * launch the app is frontmost, so an app-modal alert is seen, and a startup
+ * error with no report at all would be worse.
  */
 
 export interface UncaughtDeps {
   /** A quit is under way. */
   quitting: () => boolean;
-  /** A live window exists for the box to appear over. */
-  hasWindow: () => boolean;
+  /** The app had a window and no longer does. */
+  windowGone: () => boolean;
   /** Record the error. Must not throw, and should not be lost at exit. */
   log: (text: string) => void;
   /** `dialog.showErrorBox`. */
@@ -29,9 +32,20 @@ export function describeError(err: unknown): string {
   return String(err);
 }
 
-export function handleUncaught(err: unknown, deps: UncaughtDeps): void {
+/**
+ * `kind` is how the error escaped. An unhandled rejection is only logged:
+ * Electron's own default for those is a console warning, never a box, and
+ * some are routine (a `loadURL` superseded by the next navigation rejects).
+ */
+export function handleUncaught(
+  err: unknown,
+  deps: UncaughtDeps,
+  kind: "exception" | "rejection" = "exception",
+): void {
   const detail = describeError(err);
-  deps.log(`[steamtrain] uncaught exception in the main process: ${detail}`);
-  if (deps.quitting() || !deps.hasWindow()) return;
+  deps.log(
+    `[steamtrain] ${kind === "rejection" ? "unhandled rejection" : "uncaught exception"} in the main process: ${detail}`,
+  );
+  if (kind === "rejection" || deps.quitting() || deps.windowGone()) return;
   deps.showErrorBox("A JavaScript error occurred in the main process", detail);
 }
