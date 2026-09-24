@@ -12,6 +12,11 @@ describe("stub DOM", () => {
     const root = h("div", null, h("span"));
     expect(() => root.querySelectorAll("")).toThrow(/unsupported selector/);
     expect(() => root.querySelector("span:first-child")).toThrow(/unsupported selector/);
+    for (const dangling of ["div >", "> span", "div > > span"]) {
+      expect(() => root.querySelector(dangling)).toThrow(/unsupported selector/);
+    }
+    // A well-formed one still works; the root counts as an ancestor, as in a browser.
+    expect(root.querySelectorAll("div > span")).toHaveLength(1);
   });
 
   it("refuses a malformed selector list whichever node is asked", () => {

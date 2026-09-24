@@ -462,10 +462,13 @@ function splitTop(text: string, sep: string): string[] {
 function parseChain(sel: string): Chain {
   const tokens = splitTop(sel.replace(/\s*>\s*/g, " > "), " ").filter(Boolean);
   const chain: Chain = [];
+  const unsupported = () => new Error(`stub-dom: unsupported selector "${sel}"`);
   let combinator: " " | ">" = " ";
   for (let i = tokens.length - 1; i >= 0; i--) {
     const token = tokens[i]!;
     if (token === ">") {
+      // A `>` needs a compound on each side: not first, last, or doubled.
+      if (chain.length === 0 || combinator === ">") throw unsupported();
       combinator = ">";
       continue;
     }
@@ -473,7 +476,7 @@ function parseChain(sel: string): Chain {
     chain.push({ compound: parseCompound(token, sel), combinator: " " });
     combinator = " ";
   }
-  if (chain.length === 0) throw new Error(`stub-dom: unsupported selector "${sel}"`);
+  if (chain.length === 0 || combinator === ">") throw unsupported();
   return chain;
 }
 

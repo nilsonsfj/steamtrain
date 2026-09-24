@@ -199,6 +199,7 @@ describe("new-workflow sheet", () => {
 
   it("writes a minimal runnable spec for Blank", async () => {
     const sheet = await openSheet();
+    expect(sheet.overlay.classList.contains("show")).toBe(true);
     sheet.nameInput().value = "flaky-tests";
     await sheet.create();
     expect(sheet.puts).toHaveLength(1);
@@ -235,6 +236,7 @@ describe("new-workflow sheet", () => {
     expect(sheet.puts[0]?.path).toBe("/api/workflows/bug-hunt-copy");
     expect(spec.name).toBe("bug-hunt-copy");
     expect(spec.phases).toEqual(BUNDLED_SPEC.phases);
+    expect(sheet.overlay.classList.contains("show")).toBe(false);
     expect(sheet.opened).toEqual(["bug-hunt-copy"]);
   });
 
@@ -247,6 +249,7 @@ describe("new-workflow sheet", () => {
     await sheet.create();
     expect(sheet.puts[0]?.path).toBe("/api/workflows/bug-hunt-copy");
     expect((sheet.puts[0]?.body.spec as { phases: unknown[] }).phases).toEqual(BUNDLED_SPEC.phases);
+    expect(sheet.overlay.classList.contains("show")).toBe(false);
     expect(sheet.opened).toEqual(["bug-hunt-copy"]);
   });
 
