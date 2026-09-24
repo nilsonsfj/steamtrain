@@ -71,6 +71,8 @@ async function openDiagnose(response: Record<string, unknown>): Promise<Mounted>
     },
   });
   const open = async () => {
+    // Whatever the modal shows after this, this open rendered.
+    modal.textContent = "";
     (ST.modals as { openDiagnoseModal: (r: typeof RECORD) => void }).openDiagnoseModal(RECORD);
     for (let i = 0; i < 8; i++) await Promise.resolve();
   };
@@ -170,5 +172,6 @@ describe("diagnose modal", () => {
     const m = await openDiagnose({ ok: false, error: "needs an API key" });
     await m.reopen();
     expect(m.posts).toHaveLength(2);
+    expect(m.text()).toContain("needs an API key");
   });
 });

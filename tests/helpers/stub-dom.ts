@@ -329,9 +329,13 @@ export function createDom(
     // script names inside a registered modal is as findable as on the page.
     getElementById: (id) => {
       if (byId[id]) return byId[id];
-      for (const root of [document.body, ...Object.values(byId)]) {
-        const hit = descendants(root, (n) => n.attrs.id === id)[0];
-        if (hit) return hit;
+      const named = (n: StubEl) => n.attrs.id === id;
+      const hit = descendants(document.body, named)[0];
+      if (hit) return hit;
+      // A registered root is itself in the tree, as an attached node would be.
+      for (const root of Object.values(byId)) {
+        const found = collect(root, named)[0];
+        if (found) return found;
       }
       return null;
     },
@@ -474,7 +478,7 @@ function splitTop(text: string, sep: string): string[] {
 
 /**
  * A selector's compounds and `>` combinators, split outside brackets and
- * parentheses, so `[title="a > b"]` stays one compound.
+ * parentheses, so `[title="a>b"]` stays one compound and keeps its value.
  */
 function tokenize(sel: string): string[] {
   const tokens: string[] = [];
