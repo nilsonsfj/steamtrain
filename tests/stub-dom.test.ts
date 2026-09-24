@@ -14,6 +14,28 @@ describe("stub DOM", () => {
     expect(() => root.querySelector("span:first-child")).toThrow(/unsupported selector/);
   });
 
+  it("refuses a malformed selector list whichever node is asked", () => {
+    const { h } = createDom();
+    expect(() => h("button").matches("button,")).toThrow(/unsupported selector/);
+    expect(() => h("span").matches("button,")).toThrow(/unsupported selector/);
+  });
+
+  it("keeps an element's text in a child, so removing children clears it", () => {
+    const { h } = createDom();
+    const node = h("div", { text: "old" });
+    // st-core's clear().
+    while (node.firstChild) node.removeChild(node.firstChild);
+    expect(node.textContent).toBe("");
+  });
+
+  it("finds a node by an id a script assigned", () => {
+    const { document, h } = createDom();
+    const pane = h("div");
+    pane.id = "runsPage";
+    document.body.appendChild(pane);
+    expect(document.getElementById("runsPage")).toBe(pane);
+  });
+
   it("refuses to insert before a node that is not a child", () => {
     const { h } = createDom();
     const parent = h("div", null, h("span"));

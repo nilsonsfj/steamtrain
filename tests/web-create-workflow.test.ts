@@ -238,6 +238,18 @@ describe("new-workflow sheet", () => {
     expect(sheet.opened).toEqual(["bug-hunt-copy"]);
   });
 
+  it("copies a template under a free name for From template", async () => {
+    const sheet = await openSheet();
+    click(sheet.card("From"));
+    // The template's own name is taken (it is the bundled workflow), so the
+    // sheet proposes the next free one.
+    expect(sheet.nameInput().value).toBe("bug-hunt-copy");
+    await sheet.create();
+    expect(sheet.puts[0]?.path).toBe("/api/workflows/bug-hunt-copy");
+    expect((sheet.puts[0]?.body.spec as { phases: unknown[] }).phases).toEqual(BUNDLED_SPEC.phases);
+    expect(sheet.opened).toEqual(["bug-hunt-copy"]);
+  });
+
   it("kebab-cases whatever name is typed", async () => {
     const sheet = await openSheet();
     sheet.nameInput().value = "  Flaky Tests!! ";

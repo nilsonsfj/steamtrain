@@ -3,8 +3,8 @@
  * the full-screen history modal.
  *
  * st-runs.js is a plain IIFE over `window.Steamtrain`, so it runs here for
- * real: a stub namespace over the shared stub DOM is enough to paint the page, read back what it rendered, and fire the handlers it
- * attached. The layout invariants that only exist in the stylesheet (one grid
+ * real: a stub namespace over the shared stub DOM is enough to paint the page,
+ * read back what it rendered, and fire the handlers it attached. The layout invariants that only exist in the stylesheet (one grid
  * template shared by the header and the rows; the rails' widths) are asserted
  * against the CSS text instead.
  */

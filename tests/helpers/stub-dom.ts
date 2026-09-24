@@ -38,7 +38,7 @@ export class StubEl {
   selectionEnd: number | null = null;
   style: Record<string, string> = {};
   listeners: Record<string, Listener[]> = {};
-  /** This node's own text: a text node's data, or what `textContent` last set. */
+  /** A text node's data. An element's text lives in text-node children, as in a browser. */
   text = "";
 
   constructor(
@@ -79,7 +79,22 @@ export class StubEl {
   set textContent(v: string) {
     for (const c of this.children) c.parentNode = null;
     this.children = [];
-    this.text = v == null ? "" : String(v);
+    const text = v == null ? "" : String(v);
+    if (this.tag === "#text") {
+      this.text = text;
+      return;
+    }
+    // A child, as a browser makes one, so st-core's `clear` (which removes
+    // children) empties the node the way it would on the page.
+    this.text = "";
+    if (text) this.appendChild(this.ownerDocument.createTextNode(text));
+  }
+  /** `id` reflects its attribute, so `getElementById` finds a node a script named. */
+  get id(): string {
+    return this.attrs.id ?? "";
+  }
+  set id(v: string) {
+    this.attrs.id = String(v);
   }
   get firstChild(): StubEl | null {
     return this.children[0] ?? null;
@@ -241,7 +256,10 @@ export class StubEl {
    * never passes on a selector the stub silently ignored.
    */
   matches(sel: string): boolean {
-    return splitTop(sel, ",").some((part) => matchChain(this, parseChain(part.trim())));
+    // Parse every part before matching any, so a malformed selector throws
+    // whichever node is asked, not only the ones an earlier part misses.
+    const chains = splitTop(sel, ",").map((part) => parseChain(part.trim()));
+    return chains.some((chain) => matchChain(this, chain));
   }
   closest(sel: string): StubEl | null {
     let node: StubEl | null = this;
@@ -279,7 +297,13 @@ export interface StubDom {
   document: StubDocument;
   /** st-core's `h()`, on this document. */
   h: (tag: string, attrs?: Record<string, unknown> | null, ...kids: unknown[]) => StubEl;
-  /** Register a node for `getElementById` without attaching it to the body. */
+  /**
+   * Register a node for `getElementById` without attaching it to the body.
+   * Such a node is outside the document, as a detached one would be:
+   * `document.contains` is false for it, and its events stop short of the
+   * document's listeners. Append to `document.body` instead when a test needs
+   * either.
+   */
   byId: Record<string, StubEl>;
 }
 

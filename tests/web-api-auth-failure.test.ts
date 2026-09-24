@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { createDom, loadScripts } from "./helpers/stub-dom";
+import { type StubEl, createDom, loadScripts } from "./helpers/stub-dom";
 
 const PUBLIC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "src", "web", "public");
 const coreJs = readFileSync(join(PUBLIC_DIR, "st-core.js"), "utf8");
@@ -47,9 +47,16 @@ const modal = h("div", null, modalBody);
 const overlay = h("div", { class: "modal-overlay" });
 byId.modal = modal;
 byId.overlay = overlay;
-// Anything else st-core reaches for (the announcer, the banner) is a scratch node.
+// Anything else st-core reaches for (the announcer, the banner) is a scratch
+// node, the same one each time it asks.
+const scratch: Record<string, StubEl> = {};
 const findById = document.getElementById;
-document.getElementById = (id) => findById(id) ?? h("div");
+document.getElementById = (id) => {
+  const found = findById(id);
+  if (found) return found;
+  scratch[id] ??= h("div");
+  return scratch[id];
+};
 
 function openOverlay(open: boolean) {
   overlay.classList.toggle("show", open);

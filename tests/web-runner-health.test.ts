@@ -5,8 +5,9 @@
  * (st-core.js).
  *
  * All three are plain IIFEs over `window.Steamtrain`, so all three run here for
- * real: a stub namespace over the shared stub DOM is enough to paint them, read back what they rendered, and fire the click handlers they
- * attached. Only the paint-time invariants that live in the stylesheet
+ * real: a stub namespace over the shared stub DOM is enough to paint them,
+ * read back what they rendered, and fire the click handlers they attached.
+ * Only the paint-time invariants that live in the stylesheet
  * (hit-target size, how absent rows recede) are asserted against the CSS text.
  */
 import { readFileSync } from "node:fs";

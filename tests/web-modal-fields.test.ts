@@ -9,7 +9,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import * as SteamtrainReducer from "../src/web/reducer";
-import { type StubEl, createDom, loadScripts } from "./helpers/stub-dom";
+import { type StubEl, buttonsNamed, click, createDom, loadScripts } from "./helpers/stub-dom";
 
 const PUBLIC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "src", "web", "public");
 const modalsJs = readFileSync(join(PUBLIC_DIR, "st-modals.js"), "utf8");
@@ -61,12 +61,6 @@ function load(state: Record<string, unknown> = {}, catalog: Record<string, unkno
   };
 }
 
-function button(root: StubEl, label: string): StubEl {
-  const found = root.querySelectorAll("button").find((b) => b.textContent === label);
-  if (!found) throw new Error(`no button '${label}'`);
-  return found;
-}
-
 describe("the retry-with-agent sheet", () => {
   it("sends the model picked after switching agents", () => {
     const { modals, byId, posts } = load({
@@ -89,7 +83,7 @@ describe("the retry-with-agent sheet", () => {
     const modelSel = modal.querySelectorAll("select")[1]!;
     expect(modelSel.options.map((o) => o.attrs.value)).toEqual(["", "gpt-5.6", "gpt-6"]);
     modelSel.value = "gpt-6";
-    button(modal, "Retry with agent").fire("click");
+    click(buttonsNamed(modal, "Retry with agent")[0]);
     expect(posts).toEqual([
       { path: "/api/history/r1/retry", body: { retargetAgent: "codex", retargetModel: "gpt-6" } },
     ]);
@@ -203,7 +197,7 @@ describe("the configure sheet's nested editors", () => {
     modelSel!.fire("change");
     const effortSel = nested.querySelectorAll("select")[2]!;
     effortSel.value = "high";
-    button(nested, "Use for all →").fire("click");
+    click(buttonsNamed(nested, "Use for all →")[0]);
 
     const bulk = modal.querySelector(".bulk-retarget")!;
     expect(bulk.querySelectorAll("select").map((sel) => sel.value)).toEqual([
