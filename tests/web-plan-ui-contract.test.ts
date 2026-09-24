@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { type StubEl, createDom, flatText, loadScripts } from "./helpers/stub-dom";
 
 const PUBLIC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "src", "web", "public");
 const bootJs = readFileSync(join(PUBLIC_DIR, "st-boot.js"), "utf8");
@@ -12,43 +13,6 @@ const runJs = readFileSync(join(PUBLIC_DIR, "st-run.js"), "utf8");
 const runCss = readFileSync(join(PUBLIC_DIR, "run.css"), "utf8");
 const shellJs = readFileSync(join(PUBLIC_DIR, "st-shell.js"), "utf8");
 const planCss = readFileSync(join(PUBLIC_DIR, "plan.css"), "utf8");
-
-interface StubNode {
-  tag: string;
-  className: string;
-  textContent: string;
-  children: StubNode[];
-  listeners: Record<string, (() => void)[]>;
-  appendChild: (child: StubNode) => void;
-  addEventListener: (event: string, fn: () => void) => void;
-}
-
-function node(tag: string, attrs: Record<string, unknown> = {}, ...children: unknown[]): StubNode {
-  const result: StubNode = {
-    tag,
-    className: String(attrs.class ?? ""),
-    textContent: attrs.text == null ? "" : String(attrs.text),
-    children: [],
-    listeners: {},
-    appendChild(child) {
-      result.children.push(child);
-    },
-    addEventListener(event, fn) {
-      const listeners = result.listeners[event] ?? [];
-      result.listeners[event] = listeners;
-      listeners.push(fn);
-    },
-  };
-  for (const child of children) {
-    if (child && typeof child !== "string") result.children.push(child as StubNode);
-    else if (typeof child === "string") result.textContent += child;
-  }
-  return result;
-}
-
-function flatText(value: StubNode): string {
-  return [value.textContent, ...value.children.map(flatText)].join(" ").replace(/\s+/g, " ").trim();
-}
 
 describe("web plan and sidebar UI contracts", () => {
   it("parks the shared Inputs controls before the destructive canvas clear", () => {
@@ -99,18 +63,19 @@ describe("web plan and sidebar UI contracts", () => {
   });
 
   it("renders user workflows before bundled workflows with both group headings", () => {
-    const list = node("div");
-    const count = node("span");
+    const { document, h, byId } = createDom();
+    const list = h("div");
+    byId.wflist = list;
+    byId.wfCount = h("span");
     const workflows = [
       { name: "bundled-one", source: "bundled", phaseCount: 1, stepCount: 1 },
       { name: "user-one", source: "user", phaseCount: 2, stepCount: 3 },
     ];
-    const elements: Record<string, StubNode> = { wflist: list, wfCount: count };
     const ST: Record<string, unknown> = {
       state: { workflows, selected: null, liveRuns: [], recentRuns: null },
-      h: node,
-      clear: (target: StubNode) => {
-        target.children = [];
+      h,
+      clear: (target: StubEl) => {
+        target.textContent = "";
       },
       groupWorkflowsBySource: () => [
         { source: "bundled", entries: [workflows[0]] },
@@ -124,11 +89,7 @@ describe("web plan and sidebar UI contracts", () => {
       relTime: () => "",
       plan: null,
     };
-    const document = {
-      getElementById: (id: string) => elements[id] ?? null,
-    };
-
-    new Function("window", "document", shellJs)({ Steamtrain: ST }, document);
+    loadScripts([shellJs], { window: { Steamtrain: ST }, document });
     (ST.shell as { renderSidebar: () => void }).renderSidebar();
 
     expect(list.children.map((child) => flatText(child))).toEqual([
@@ -140,8 +101,10 @@ describe("web plan and sidebar UI contracts", () => {
   });
 
   it("labels a timed-out recent run as timed out, not canceled", () => {
-    const foot = node("div");
-    const elements: Record<string, StubNode> = { wflist: node("div"), railFoot: foot };
+    const { document, h, byId } = createDom();
+    const foot = h("div");
+    byId.wflist = h("div");
+    byId.railFoot = foot;
     const run = (id: string, status: string, timedOut?: boolean) => ({
       id,
       status,
@@ -155,16 +118,14 @@ describe("web plan and sidebar UI contracts", () => {
         liveRuns: [],
         recentRuns: [run("aaaaa1", "canceled", true), run("bbbbb2", "canceled")],
       },
-      h: node,
-      clear: (target: StubNode) => {
-        target.children = [];
+      h,
+      clear: (target: StubEl) => {
+        target.textContent = "";
       },
       truncate: (text: string) => text,
       relTime: () => "now",
     };
-    const document = { getElementById: (id: string) => elements[id] ?? null };
-
-    new Function("window", "document", shellJs)({ Steamtrain: ST }, document);
+    loadScripts([shellJs], { window: { Steamtrain: ST }, document });
     (ST.shell as { renderLiveRuns: () => void }).renderLiveRuns();
 
     const rows = foot.children.map((child) => flatText(child));

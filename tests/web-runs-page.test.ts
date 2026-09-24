@@ -3,120 +3,30 @@
  * the full-screen history modal.
  *
  * st-runs.js is a plain IIFE over `window.Steamtrain`, so it runs here for
- * real: a stub namespace with an `h()` that builds inert nodes is enough to
- * paint the page, read back what it rendered, and fire the handlers it
- * attached. The layout invariants that only exist in the stylesheet (one grid
- * template shared by the header and the rows; the rails' widths) are asserted
- * against the CSS text instead.
+ * real: a stub namespace over the shared stub DOM is enough to paint the page,
+ * read back what it rendered, and fire the handlers it attached. The layout
+ * invariants that only exist in the stylesheet (one grid template shared by
+ * the header and the rows; the rails' widths) are asserted against the CSS
+ * text instead.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import {
+  type StubEl,
+  buttonsNamed,
+  click,
+  collect,
+  createDom,
+  flatText,
+  hasClass,
+  loadScripts,
+} from "./helpers/stub-dom";
 
 const PUBLIC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "src", "web", "public");
 const runsJs = readFileSync(join(PUBLIC_DIR, "st-runs.js"), "utf8");
 const runsCss = readFileSync(join(PUBLIC_DIR, "runs.css"), "utf8");
-
-interface StubEl {
-  tag: string;
-  attrs: Record<string, unknown>;
-  children: StubEl[];
-  text: string;
-  listeners: Record<string, ((e?: unknown) => void)[]>;
-  className: string;
-  textContent: string;
-  checked?: boolean;
-  disabled?: boolean;
-  style: Record<string, string>;
-  appendChild: (child: StubEl) => void;
-  addEventListener: (event: string, fn: (e?: unknown) => void) => void;
-  classList: { add: (c: string) => void; toggle: (c: string, on: boolean) => void };
-  querySelector: (sel: string) => StubEl | null;
-  querySelectorAll: (sel: string) => StubEl[];
-  focus: () => void;
-}
-
-/** The `h()` these modules build their DOM with, minus the DOM. */
-function el(tag: string, attrs?: Record<string, unknown>, ...kids: unknown[]): StubEl {
-  const node: StubEl = {
-    tag,
-    attrs: attrs ?? {},
-    children: [],
-    // `h()` treats a `text` attribute as textContent; children append after it.
-    text: attrs?.text == null ? "" : String(attrs.text),
-    listeners: {},
-    className: String(attrs?.class ?? ""),
-    textContent: "",
-    checked: attrs?.checked === true,
-    // h() mirrors boolean attributes onto the element, which is how the page
-    // disables Compare until a second run is checked.
-    disabled: attrs?.disabled === true,
-    style: {},
-    appendChild: (child) => node.children.push(child),
-    addEventListener: (event, fn) => {
-      const bucket = node.listeners[event] ?? [];
-      node.listeners[event] = bucket;
-      bucket.push(fn);
-    },
-    classList: {
-      add: (c) => {
-        node.className = `${node.className} ${c}`.trim();
-      },
-      toggle: () => {},
-    },
-    querySelector: (sel) => find(node, sel)[0] ?? null,
-    querySelectorAll: (sel) => find(node, sel),
-    focus: () => {},
-  };
-  // st-core's h() turns an `onFoo: fn` attribute into addEventListener("foo"),
-  // and st-runs.js attaches most of its handlers that way — without this the
-  // page would paint but nothing would be clickable.
-  for (const [key, value] of Object.entries(attrs ?? {})) {
-    if (key.startsWith("on") && typeof value === "function") {
-      node.addEventListener(key.slice(2).toLowerCase(), value as () => void);
-    }
-  }
-  for (const kid of kids) {
-    if (kid == null) continue;
-    if (typeof kid === "string") node.text += kid;
-    else node.children.push(kid as StubEl);
-  }
-  return node;
-}
-
-/** Enough of a selector engine for `.cls` and `[data-focus-key="…"]`. */
-function find(root: StubEl, sel: string, out: StubEl[] = []): StubEl[] {
-  const match = (n: StubEl) => {
-    if (sel.startsWith(".")) return n.className.split(" ").includes(sel.slice(1));
-    const attr = /^\[([\w-]+)="(.*)"\]$/.exec(sel);
-    if (attr) return String(n.attrs[attr[1] as string] ?? "") === attr[2];
-    return false;
-  };
-  for (const kid of root.children) {
-    if (match(kid)) out.push(kid);
-    find(kid, sel, out);
-  }
-  return out;
-}
-
-function collect(node: StubEl, pred: (n: StubEl) => boolean, out: StubEl[] = []): StubEl[] {
-  if (pred(node)) out.push(node);
-  for (const kid of node.children) collect(kid, pred, out);
-  return out;
-}
-function hasClass(node: StubEl, cls: string): boolean {
-  return node.className.split(" ").includes(cls);
-}
-function flatText(node: StubEl): string {
-  return [node.text, ...node.children.map(flatText)].join(" ").replace(/\s+/g, " ").trim();
-}
-function click(node: StubEl): void {
-  for (const fn of node.listeners.click ?? []) fn({ target: node });
-}
-function buttonsNamed(root: StubEl, label: string): StubEl[] {
-  return collect(root, (n) => n.tag === "button" && flatText(n) === label);
-}
 
 const HOUR = 3600_000;
 
@@ -206,7 +116,8 @@ async function mountRuns(opts: {
   /** The answer to a worktree row's per-step diff fetch. Omitted ⇒ an empty 200. */
   diffResponse?: { status: number; body: Record<string, unknown> };
 }): Promise<Mounted> {
-  const root = el("div");
+  const { document, h } = createDom();
+  const root = h("div");
   const location = { hash: "#runs", pathname: "/", search: "" };
   const said: string[] = [];
   const diagnoseCalls: unknown[] = [];
@@ -218,9 +129,9 @@ async function mountRuns(opts: {
   let stored = opts.runs ?? [];
   const ST: Record<string, unknown> = {
     state: { page: "runs", liveRuns: [] },
-    h: el,
+    h,
     clear: (node: StubEl) => {
-      node.children = [];
+      node.textContent = "";
     },
     activateWithKeyboard: (e: { key: string }, action: () => void) => {
       if (e.key === "Enter" || e.key === " ") action();
@@ -253,7 +164,7 @@ async function mountRuns(opts: {
       rerunHistory: () => {},
       openRetryRetargetModal: () => {},
       openDiagnoseModal: (rec: unknown) => diagnoseCalls.push(rec),
-      safeExternalLink: () => el("a"),
+      safeExternalLink: () => h("a"),
     },
     api: () => Promise.resolve({ status: 200, body: { runs: opts.live ?? [] } }),
     apiAuth: (method: string, path: string, payload?: unknown) => {
@@ -312,13 +223,13 @@ async function mountRuns(opts: {
       },
     },
   };
-  new Function("window", "document", "setInterval", "clearInterval", "history", runsJs)(
+  loadScripts([runsJs], {
     window,
-    { getElementById: () => null, body: el("body") },
-    () => 0,
-    () => {},
-    window.history,
-  );
+    document,
+    setInterval: () => 0,
+    clearInterval: () => {},
+    history: window.history,
+  });
   const runs = ST.runs as {
     render: (c: StubEl, id?: string) => void;
     handleKey: (e: unknown) => boolean;
@@ -334,13 +245,13 @@ async function mountRuns(opts: {
     rows: () => rowNodes().map((n) => ({ text: flatText(n), cls: n.className, node: n })),
     rail: () =>
       collect(root, (n) => hasClass(n, "runs-rail-row")).map((n) => ({
-        label: flatText(find(n, ".label")[0] ?? el("span")),
-        count: flatText(find(n, ".count")[0] ?? el("span")),
+        label: flatText(n.querySelector(".label") ?? h("span")),
+        count: flatText(n.querySelector(".count") ?? h("span")),
         active: hasClass(n, "active"),
       })),
-    receipt: () => flatText(collect(root, (n) => hasClass(n, "runs-receipt"))[0] ?? el("div")),
-    head: () => flatText(collect(root, (n) => hasClass(n, "runs-head"))[0] ?? el("div")),
-    main: () => flatText(collect(root, (n) => hasClass(n, "runs-main"))[0] ?? el("div")),
+    receipt: () => flatText(collect(root, (n) => hasClass(n, "runs-receipt"))[0] ?? h("div")),
+    head: () => flatText(collect(root, (n) => hasClass(n, "runs-head"))[0] ?? h("div")),
+    main: () => flatText(collect(root, (n) => hasClass(n, "runs-main"))[0] ?? h("div")),
     hash: () => location.hash,
     said,
     diagnoseCalls,
@@ -361,7 +272,7 @@ async function mountRuns(opts: {
     check: async (index: number) => {
       const box = collect(root, (n) => hasClass(n, "runs-check"))[index] as StubEl;
       box.checked = true;
-      for (const fn of box.listeners.change ?? []) fn({ target: box });
+      box.fire("change");
       await Promise.resolve();
     },
     clickStep: async (stepId: string) => {
@@ -373,7 +284,7 @@ async function mountRuns(opts: {
       for (let i = 0; i < 6; i++) await Promise.resolve();
     },
     clickButton: async (label: string) => {
-      const btn = collect(root, (n) => n.tag === "button" && flatText(n) === label)[0];
+      const btn = buttonsNamed(root, label)[0];
       if (!btn) throw new Error(`no "${label}" button`);
       click(btn);
       for (let i = 0; i < 6; i++) await Promise.resolve();

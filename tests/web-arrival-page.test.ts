@@ -2,8 +2,8 @@
  * Contract for the finished-run page (design 5a, st-arrival.js).
  *
  * st-arrival.js is a plain IIFE over `window.Steamtrain`, so it runs here for
- * real, the way tests/web-runs-page.test.ts runs the runs page: a stub `h()`
- * builds inert nodes, the run state comes from the real web reducer folding
+ * real, the way tests/web-runs-page.test.ts runs the runs page: against the
+ * shared stub DOM, with the run state coming from the real web reducer folding
  * real workflow events, and the assertions read back what the page painted
  * and fire the handlers it attached. The layout invariants that only exist in
  * the stylesheet are asserted against the CSS text, and the few that live in
@@ -16,6 +16,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as SteamtrainReducer from "../src/web/reducer";
 import type { WorkflowEvent } from "../src/workflow";
 import type { WorkflowState } from "../src/workflow/reducer";
+import {
+  type StubEl,
+  buttonsNamed,
+  byClass,
+  click,
+  createDom,
+  hasClass,
+  loadScripts,
+  shownText,
+} from "./helpers/stub-dom";
 
 const PUBLIC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "src", "web", "public");
 const arrivalJs = readFileSync(join(PUBLIC_DIR, "st-arrival.js"), "utf8");
@@ -33,103 +43,11 @@ function ruleBody(sheet: string, selector: string): string {
   return bodies.join("\n");
 }
 
-// ── stub DOM ─────────────────────────────────────────────────────────────────
-
-interface StubEl {
-  tag: string;
-  attrs: Record<string, unknown>;
-  children: StubEl[];
-  text: string;
-  textContent: string;
-  className: string;
-  hidden?: boolean;
-  listeners: Record<string, ((e?: unknown) => void)[]>;
-  appendChild: (child: StubEl) => StubEl;
-  removeChild: (child: StubEl) => void;
-  addEventListener: (event: string, fn: (e?: unknown) => void) => void;
-  contains: (other: unknown) => boolean;
-  click: () => void;
-  focus: () => void;
-}
-
-/** The `h()` st-core gives these modules, minus the DOM. */
-function el(tag: string, attrs?: Record<string, unknown> | null, ...kids: unknown[]): StubEl {
-  const node: StubEl = {
-    tag,
-    attrs: attrs ?? {},
-    children: [],
-    text: attrs?.text == null ? "" : String(attrs.text),
-    get textContent() {
-      return node.text;
-    },
-    set textContent(value: string) {
-      node.text = value;
-      node.children = [];
-    },
-    className: String(attrs?.class ?? ""),
-    listeners: {},
-    appendChild: (child) => {
-      node.children.push(child);
-      return child;
-    },
-    removeChild: (child) => {
-      node.children = node.children.filter((c) => c !== child);
-    },
-    addEventListener: (event, fn) => {
-      const bucket = node.listeners[event] ?? [];
-      node.listeners[event] = bucket;
-      bucket.push(fn);
-    },
-    contains: (other) => other === node || node.children.some((c) => c.contains(other)),
-    click: () => {},
-    focus: () => {},
-  };
-  // st-core's h() turns `onFoo: fn` into addEventListener("foo").
-  for (const [key, value] of Object.entries(attrs ?? {})) {
-    if (key.startsWith("on") && typeof value === "function") {
-      node.addEventListener(key.slice(2).toLowerCase(), value as () => void);
-    }
-  }
-  for (const kid of kids) {
-    if (kid == null) continue;
-    node.children.push(typeof kid === "string" ? textNode(kid) : (kid as StubEl));
-  }
-  return node;
-}
-
-function textNode(text: string): StubEl {
-  return el("#text", { text });
-}
-
-function all(root: StubEl, pred: (n: StubEl) => boolean, out: StubEl[] = []): StubEl[] {
-  for (const kid of root.children) {
-    if (pred(kid)) out.push(kid);
-    all(kid, pred, out);
-  }
-  return out;
-}
-function hasClass(node: StubEl, cls: string): boolean {
-  return node.className.split(" ").includes(cls);
-}
-function byClass(root: StubEl, cls: string): StubEl[] {
-  return all(root, (n) => hasClass(n, cls));
-}
-function rawText(node: StubEl): string {
-  return [node.text, ...node.children.map(rawText)].join("");
-}
-function flatText(node: StubEl): string {
-  return rawText(node).replace(/\s+/g, " ").trim();
-}
-function click(node: StubEl | undefined): void {
-  if (!node) throw new Error("nothing to click");
-  for (const fn of node.listeners.click ?? []) fn({ target: node });
-}
-
 /** The value half of a tile or footer row (`.k`/label, then `.v`). */
 function shownValue(root: StubEl, cls: "tile" | "row", label: string): string {
-  const box = byClass(root, cls).find((n) => flatText(n.children[0] as StubEl) === label);
+  const box = byClass(root, cls).find((n) => shownText(n.children[0] as StubEl) === label);
   if (!box) throw new Error(`no ${cls} labelled ${label}`);
-  return flatText(byClass(box, "v")[0] as StubEl);
+  return shownText(byClass(box, "v")[0] as StubEl);
 }
 
 // ── mounting ─────────────────────────────────────────────────────────────────
@@ -204,24 +122,12 @@ function mount(opts: {
     openRuns: [],
     worktreeFetches: 0,
   };
-  const docListeners = new Map<string, Set<unknown>>();
-  const document = {
-    createTextNode: textNode,
-    body: el("body"),
-    addEventListener: (type: string, fn: unknown) => {
-      const set = docListeners.get(type) ?? new Set();
-      docListeners.set(type, set);
-      set.add(fn);
-    },
-    removeEventListener: (type: string, fn: unknown) => {
-      docListeners.get(type)?.delete(fn);
-    },
-  };
+  const { document, h } = createDom();
   const answers = opts.worktrees ?? [{ status: 200, body: { sources: [] } }];
-  let canvas = el("div");
+  let canvas = h("div");
   const ST: Record<string, unknown> = {
     state: S,
-    h: el,
+    h,
     KIND_LABEL: { worker: "worker", command: "command", gate: "gate" },
     activateWithKeyboard: (e: { key: string }, action: () => void) => {
       if (e.key === "Enter" || e.key === " ") action();
@@ -242,7 +148,7 @@ function mount(opts: {
       return Promise.resolve({ status: answer.status, body: answer.body ?? {} });
     },
     render: () => {
-      canvas = el("div");
+      canvas = h("div");
       (ST.arrival as { renderArrival: (c: StubEl) => boolean }).renderArrival(canvas);
     },
     modals: {
@@ -256,22 +162,23 @@ function mount(opts: {
     runs: { open: (id: unknown) => calls.openRuns.push(id) },
     selectWorkflow: () => {},
   };
-  new Function("window", "document", "SteamtrainReducer", "requestAnimationFrame", arrivalJs)(
-    { Steamtrain: ST },
+  loadScripts([arrivalJs], {
+    window: { Steamtrain: ST },
     document,
     SteamtrainReducer,
-    () => {},
-  );
+    requestAnimationFrame: () => {},
+  });
   const render = ST.render as () => void;
   render();
   return {
     S,
     page: () => canvas,
-    text: () => flatText(canvas),
-    button: (label) => all(canvas, (n) => n.tag === "button" && flatText(n) === label)[0],
+    text: () => shownText(canvas),
+    button: (label) => buttonsNamed(canvas, label)[0],
     render,
     calls,
-    documentListeners: () => [...docListeners.values()].reduce((n, set) => n + set.size, 0),
+    documentListeners: () =>
+      Object.values(document.listeners).reduce((n, fns) => n + fns.length, 0),
     leave: () => (ST.arrival as { leave: () => void }).leave(),
   };
 }
@@ -391,7 +298,7 @@ describe("finished-run page: run actions are not workflow actions", () => {
   it("puts every workflow action behind one menu whose items name the workflow", () => {
     const page = mount({ state: failedRun(), source: "project" });
     click(page.button("Workflow▾"));
-    const items = byClass(page.page(), "arrival-menu-item").map(flatText);
+    const items = byClass(page.page(), "arrival-menu-item").map(shownText);
     expect(items).toEqual([
       "Configure workflow",
       "Clone workflow",
@@ -411,7 +318,7 @@ describe("finished-run page: run actions are not workflow actions", () => {
     // A bundled workflow has no file to delete it from.
     const bundled = mount({ state: failedRun(), source: "bundled" });
     click(bundled.button("Workflow▾"));
-    expect(byClass(bundled.page(), "arrival-menu-item").map(flatText)).not.toContain(
+    expect(byClass(bundled.page(), "arrival-menu-item").map(shownText)).not.toContain(
       expect.stringContaining("Delete"),
     );
   });
@@ -450,15 +357,15 @@ describe("finished-run page: the page ends in an action", () => {
   it("states the root cause, what it took down, and the evidence", () => {
     const page = mount({ state: failedRun(), spec: specWith("test", "npm test") });
     const cause = byClass(page.page(), "rootcause")[0] as StubEl;
-    expect(flatText(byClass(cause, "kicker")[0] as StubEl)).toBe("Root cause");
-    expect(flatText(byClass(cause, "what")[0] as StubEl)).toBe(
+    expect(shownText(byClass(cause, "kicker")[0] as StubEl)).toBe("Root cause");
+    expect(shownText(byClass(cause, "what")[0] as StubEl)).toBe(
       "Step test failed: command exited with code 1",
     );
-    expect(flatText(byClass(cause, "blocked")[0] as StubEl)).toBe(
+    expect(shownText(byClass(cause, "blocked")[0] as StubEl)).toBe(
       "Everything after it was skipped, not run: deploy.",
     );
     // The failing command, then the last lines of what it printed.
-    const evidence = flatText(byClass(cause, "rootcause-evidence")[0] as StubEl);
+    const evidence = shownText(byClass(cause, "rootcause-evidence")[0] as StubEl);
     expect(evidence).toContain("$ npm test");
     expect(evidence).toContain("expected 200, got 500");
     expect(page.button("Edit this step")).toBeDefined();
@@ -482,7 +389,7 @@ describe("finished-run page: the page ends in an action", () => {
 
   it("says a clean run is complete and shows its receipt instead of findings", () => {
     const page = mount({ state: cleanRun(), runStatus: "done" });
-    expect(flatText(byClass(page.page(), "arrival-state")[0] as StubEl)).toBe("complete");
+    expect(shownText(byClass(page.page(), "arrival-state")[0] as StubEl)).toBe("complete");
     expect(byClass(page.page(), "rootcause")).toHaveLength(0);
     // With no root cause, the primary action is to run it again.
     expect(page.button("Run again")?.className).toBe("btn primary");
@@ -495,10 +402,10 @@ describe("finished-run page: failed is not skipped", () => {
   it("groups the steps that never started under their own header", () => {
     const page = mount({ state: failedRun() });
     const ledger = byClass(page.page(), "ledger")[0] as StubEl;
-    expect(flatText(byClass(ledger, "count")[0] as StubEl)).toBe("2 of 3 ran");
-    expect(byClass(ledger, "ledger-group").map(flatText)).toEqual(["Never started — 1 step"]);
+    expect(shownText(byClass(ledger, "count")[0] as StubEl)).toBe("2 of 3 ran");
+    expect(byClass(ledger, "ledger-group").map(shownText)).toEqual(["Never started — 1 step"]);
     const rows = byClass(ledger, "ledger-row");
-    expect(rows.map((r) => flatText(byClass(r, "sub")[0] as StubEl))).toEqual([
+    expect(rows.map((r) => shownText(byClass(r, "sub")[0] as StubEl))).toEqual([
       "command · succeeded",
       "command · command exited with code 1",
       "command · blocked by test",
@@ -526,11 +433,11 @@ describe("finished-run page: failed is not skipped", () => {
 
   it("shows the failing step's output, and any ledger row swaps it", () => {
     const page = mount({ state: failedRun() });
-    const who = () => flatText(byClass(page.page(), "arrival-output-head")[0] as StubEl);
+    const who = () => shownText(byClass(page.page(), "arrival-output-head")[0] as StubEl);
     expect(who()).toContain("test");
     click(byClass(page.page(), "ledger-row")[0]);
     expect(who()).toContain("build");
-    expect(flatText(byClass(page.page(), "arrival-output-body")[0] as StubEl)).toBe("built");
+    expect(shownText(byClass(page.page(), "arrival-output-body")[0] as StubEl)).toBe("built");
   });
 });
 
@@ -539,16 +446,16 @@ describe("finished-run page: failed is not skipped", () => {
 describe("finished-run page: a canceled run is not a failed one", () => {
   it("states the run's own status and where it was stopped, and offers to resume", () => {
     const page = mount({ state: canceledRun(), runStatus: "canceled" });
-    expect(flatText(byClass(page.page(), "arrival-state")[0] as StubEl)).toBe("canceled");
+    expect(shownText(byClass(page.page(), "arrival-state")[0] as StubEl)).toBe("canceled");
     const cause = byClass(page.page(), "rootcause")[0] as StubEl;
     expect(hasClass(cause, "interrupted")).toBe(true);
-    expect(flatText(byClass(cause, "kicker")[0] as StubEl)).toBe("Stopped here");
-    expect(flatText(byClass(cause, "what")[0] as StubEl)).toBe(
+    expect(shownText(byClass(cause, "kicker")[0] as StubEl)).toBe("Stopped here");
+    expect(shownText(byClass(cause, "what")[0] as StubEl)).toBe(
       "Run canceled while test was running",
     );
     expect(page.button("Resume from test")).toBeDefined();
     const sub = byClass(page.page(), "ledger-row").map((r) =>
-      flatText(byClass(r, "sub")[0] as StubEl),
+      shownText(byClass(r, "sub")[0] as StubEl),
     );
     expect(sub).toContain("command · interrupted — run canceled");
     expect(shownValue(page.page(), "tile", "Steps")).toBe("1 ok · 1 interrupted");
@@ -567,19 +474,19 @@ describe("finished-run page: a canceled run is not a failed one", () => {
     const page = mount({ state, runStatus: "canceled" });
     const cause = byClass(page.page(), "rootcause")[0] as StubEl;
     expect(hasClass(cause, "interrupted")).toBe(false);
-    expect(flatText(byClass(cause, "what")[0] as StubEl)).toBe(
+    expect(shownText(byClass(cause, "what")[0] as StubEl)).toBe(
       "Step test failed: command timed out after 30s",
     );
   });
 
   it("tells a workflow timeout apart from a cancel", () => {
     const page = mount({ state: canceledRun(), runStatus: "timed-out" });
-    expect(flatText(byClass(page.page(), "arrival-state")[0] as StubEl)).toBe("timed out");
+    expect(shownText(byClass(page.page(), "arrival-state")[0] as StubEl)).toBe("timed out");
   });
 
   it("says 'stopped' before the final status frame lands, not 'failed'", () => {
     const page = mount({ state: canceledRun(), runStatus: null });
-    expect(flatText(byClass(page.page(), "arrival-state")[0] as StubEl)).toBe("stopped");
+    expect(shownText(byClass(page.page(), "arrival-state")[0] as StubEl)).toBe("stopped");
   });
 
   it("lists the ledger in the order steps ran, so a loop's later pass is not last", () => {
@@ -622,7 +529,7 @@ describe("finished-run page: a canceled run is not a failed one", () => {
     );
     const page = mount({ state, runStatus: "done" });
     const ids = byClass(page.page(), "ledger-row").map((r) =>
-      flatText(byClass(r, "id")[0] as StubEl),
+      shownText(byClass(r, "id")[0] as StubEl),
     );
     expect(ids).toEqual(["fix", "check", "fix", "report"]);
   });

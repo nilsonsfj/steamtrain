@@ -17,6 +17,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it } from "vitest";
 import * as SteamtrainReducer from "../src/web/reducer";
+import { type StubDocument, StubEl, createDom, loadScripts } from "./helpers/stub-dom";
 
 const PUBLIC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "src", "web", "public");
 const read = (name: string) => readFileSync(join(PUBLIC_DIR, name), "utf8");
@@ -24,143 +25,39 @@ const coreJs = read("st-core.js");
 const instrumentsJs = read("st-instruments.js");
 const runJs = read("st-run.js");
 
-type Listener = (e?: unknown) => void;
-
 /** Layout of the event log: its viewport, header and a row's height per 30 characters of text. */
 const LOG_TOP = 100;
 const LOG_VIEWPORT = 100;
 const LABEL_HEIGHT = 16;
 const LINE_HEIGHT = 20;
 
-class StubEl {
-  attrs: Record<string, string> = {};
-  children: StubEl[] = [];
-  parentNode: StubEl | null = null;
-  className = "";
-  value = "";
-  text = "";
-  open = false;
-  selectionStart: number | null = null;
-  selectionEnd: number | null = null;
-  style: Record<string, string> = {};
-  listeners: Record<string, Listener[]> = {};
+/**
+ * The stub element plus a layout model for the event log only: a fixed
+ * viewport, a header, and rows whose height grows with their text (so they
+ * wrap), scrolled by a clamped `scrollTop`.
+ */
+class LayoutEl extends StubEl {
   private top = 0;
-  constructor(readonly tag: string) {
-    if (tag === "input" || tag === "textarea") {
-      this.selectionStart = 0;
-      this.selectionEnd = 0;
-    }
-  }
 
-  get textContent(): string {
-    return this.text + this.children.map((c) => c.textContent).join("");
+  private get log(): LayoutEl | null {
+    return this.closest(".eventlog") as LayoutEl | null;
   }
-  set textContent(v: string) {
-    this.children = [];
-    this.text = v;
-  }
-  get firstChild(): StubEl | null {
-    return this.children[0] ?? null;
-  }
-  appendChild(c: StubEl): StubEl {
-    c.parentNode = this;
-    this.children.push(c);
-    return c;
-  }
-  removeChild(c: StubEl): void {
-    this.children = this.children.filter((k) => k !== c);
-    c.parentNode = null;
-  }
-  setAttribute(k: string, v: string): void {
-    this.attrs[k] = String(v);
-    if (k === "style") {
-      for (const decl of String(v).split(";")) {
-        const [prop, val] = decl.split(":");
-        if (prop?.trim()) this.style[prop.trim()] = (val ?? "").trim();
-      }
-    }
-  }
-  getAttribute(k: string): string | null {
-    return this.attrs[k] ?? null;
-  }
-  addEventListener(event: string, fn: Listener): void {
-    const bucket = this.listeners[event] ?? [];
-    this.listeners[event] = bucket;
-    bucket.push(fn);
-  }
-  fire(event: string): void {
-    for (const fn of this.listeners[event] ?? []) {
-      fn({ target: this, currentTarget: this, preventDefault() {}, stopPropagation() {} });
-    }
-  }
-  focus(): void {
-    stubDocument.activeElement = this;
-  }
-  setSelectionRange(start: number, end: number): void {
-    this.selectionStart = start;
-    this.selectionEnd = end;
-  }
-  classList = {
-    add: (c: string) => this.setClass(c, true),
-    remove: (c: string) => this.setClass(c, false),
-    toggle: (c: string, on?: boolean) => this.setClass(c, on ?? !this.classList.contains(c)),
-    contains: (c: string) => this.className.split(" ").includes(c),
-  };
-  private setClass(c: string, on: boolean): void {
-    const parts = new Set(this.className.split(" ").filter(Boolean));
-    if (on) parts.add(c);
-    else parts.delete(c);
-    this.className = [...parts].join(" ");
-  }
-  /** Selectors the code under test uses: `.a`, `[attr]`, `[attr="v"]`, `.a > [attr]`, `.a > [attr="v"]`. */
-  matches(sel: string): boolean {
-    const child = sel.split(" > ");
-    if (child.length === 2) {
-      return Boolean(this.parentNode?.matches(child[0]!)) && this.matches(child[1]!);
-    }
-    if (sel.startsWith(".")) return this.classList.contains(sel.slice(1));
-    const attr = /^\[([\w-]+)(?:="([^"]*)")?\]$/.exec(sel);
-    if (attr) {
-      const [, name, value] = attr;
-      return name! in this.attrs && (value === undefined || this.attrs[name!] === value);
-    }
-    return this.tag === sel;
-  }
-  closest(sel: string): StubEl | null {
-    let node: StubEl | null = this;
-    while (node && !node.matches(sel)) node = node.parentNode;
-    return node;
-  }
-  querySelectorAll(sel: string, out: StubEl[] = []): StubEl[] {
-    for (const kid of this.children) {
-      if (kid.matches(sel)) out.push(kid);
-      kid.querySelectorAll(sel, out);
-    }
-    return out;
-  }
-  querySelector(sel: string): StubEl | null {
-    return this.querySelectorAll(sel)[0] ?? null;
-  }
-
-  // ---- layout, for the event log only ----
-  private get log(): StubEl | null {
-    return this.closest(".eventlog");
-  }
-  private get height(): number {
+  get layoutHeight(): number {
     if (this.classList.contains("inst-label")) return LABEL_HEIGHT;
-    if ("data-seq" in this.attrs)
+    if ("data-seq" in this.attrs) {
       return LINE_HEIGHT * Math.max(1, Math.ceil(this.textContent.length / 30));
-    return this.children.reduce((sum, c) => sum + c.height, 0);
+    }
+    return this.children.reduce((sum, c) => sum + (c as LayoutEl).layoutHeight, 0);
   }
   /** Offset of this node's top within its scroll container's content. */
-  private get offset(): number {
-    const parent = this.parentNode;
+  get layoutOffset(): number {
+    const parent = this.parentNode as LayoutEl | null;
     if (!parent || this.classList.contains("eventlog")) return 0;
     const before = parent.children.slice(0, parent.children.indexOf(this));
-    return parent.offset + before.reduce((sum, c) => sum + c.height, 0);
+    return parent.layoutOffset + before.reduce((sum, c) => sum + (c as LayoutEl).layoutHeight, 0);
   }
   get scrollHeight(): number {
-    return this.height;
+    return this.layoutHeight;
   }
   get clientHeight(): number {
     return LOG_VIEWPORT;
@@ -174,28 +71,13 @@ class StubEl {
   getBoundingClientRect(): { top: number; bottom: number } {
     const log = this.log;
     if (!log || log === this) return { top: LOG_TOP, bottom: LOG_TOP + LOG_VIEWPORT };
-    const top = LOG_TOP + this.offset - log.scrollTop;
-    return { top, bottom: top + this.height };
+    const top = LOG_TOP + this.layoutOffset - log.scrollTop;
+    return { top, bottom: top + this.layoutHeight };
   }
 }
 
-const stubDocument = {
-  activeElement: null as StubEl | null,
-  body: new StubEl("body"),
-  byId: {} as Record<string, StubEl>,
-  getElementById(id: string) {
-    return this.byId[id] ?? null;
-  },
-  createElement: (tag: string) => new StubEl(tag),
-  createTextNode: (text: string) => {
-    const node = new StubEl("#text");
-    node.text = text;
-    return node;
-  },
-  querySelector: (sel: string) => stubDocument.body.querySelector(sel),
-  querySelectorAll: (sel: string) => stubDocument.body.querySelectorAll(sel),
-  contains: () => true,
-};
+/** The document of the client loaded last (see {@link loadClient}). */
+let stubDocument: StubDocument;
 
 interface Client {
   S: Record<string, unknown> & {
@@ -213,40 +95,27 @@ interface Client {
 
 /** Load the client modules over the stub DOM, as the page's script tags do. */
 function loadClient(): Client {
-  stubDocument.body = new StubEl("body");
-  stubDocument.activeElement = null;
-  stubDocument.byId = {};
+  stubDocument = createDom({ element: (tag, doc) => new LayoutEl(tag, doc) }).document;
   const window: Record<string, unknown> = {
     SteamtrainReducer,
-    SteamtrainDiff: { renderPatch: () => new StubEl("pre") },
+    SteamtrainDiff: { renderPatch: () => stubDocument.createElement("pre") },
     location: { hash: "", pathname: "/", search: "" },
     addEventListener: () => {},
   };
-  const args = [
-    "window",
-    "document",
-    "localStorage",
-    "setInterval",
-    "clearInterval",
-    "setTimeout",
-    "SteamtrainReducer",
-  ];
-  const values = [
+  loadScripts([coreJs, instrumentsJs, runJs], {
     window,
-    stubDocument,
-    { getItem: () => null, setItem: () => {} },
-    () => 1,
-    () => {},
-    () => 0,
-    window.SteamtrainReducer,
-  ];
-  for (const source of [coreJs, instrumentsJs, runJs]) new Function(...args, source)(...values);
+    document: stubDocument,
+    localStorage: { getItem: () => null, setItem: () => {} },
+    setInterval: () => 1,
+    clearInterval: () => {},
+    setTimeout: () => 0,
+    SteamtrainReducer,
+  });
   const ST = window.Steamtrain as Record<string, unknown> & {
     state: Client["S"];
     instruments: Client["instruments"];
     run: { renderCard: Client["renderCard"] };
   };
-  ST.agentUiLabel = (id: string) => id;
   return {
     S: ST.state,
     captureFocus: ST.captureFocus as Client["captureFocus"],
@@ -264,7 +133,7 @@ describe("captureFocus / restoreFocus", () => {
 
   /** The page as one render paints it: a text box and a button, each with its focus key. */
   function paint() {
-    stubDocument.body.children = [];
+    stubDocument.body.textContent = "";
     const box = stubDocument.createElement("textarea");
     box.setAttribute("data-focus-key", "human-input:review:2:ask");
     const button = stubDocument.createElement("button");
@@ -298,7 +167,7 @@ describe("captureFocus / restoreFocus", () => {
     const before = paint().box;
     before.focus();
     const token = client.captureFocus();
-    stubDocument.body.children = []; // the step finished; its form is gone
+    stubDocument.body.textContent = ""; // the step finished; its form is gone
     stubDocument.body.appendChild(stubDocument.createElement("button"));
     expect(client.restoreFocus(token)).toBe(false);
     expect(stubDocument.activeElement).toBe(before); // nothing else was focused
@@ -333,7 +202,7 @@ describe("the event log's scroll anchor", () => {
   beforeEach(() => {
     client = loadClient();
     client.instruments.reset();
-    rail = new StubEl("div");
+    rail = stubDocument.createElement("div");
     at = 0;
   });
 
@@ -343,14 +212,14 @@ describe("the event log's scroll anchor", () => {
       client.instruments.onEvent({ kind: "step_start", stepId: text(at), ts: at });
     }
   }
-  const view = () => rail.querySelector(".eventlog")!;
+  const view = () => rail.querySelector(".eventlog") as LayoutEl;
   /** The entry at the top edge of the viewport, and how far it sits from that edge. */
   function reading() {
     const box = view();
     const top = box.getBoundingClientRect().top;
-    const row = box
-      .querySelectorAll(".rows > [data-seq]")
-      .find((r) => r.getBoundingClientRect().bottom > top + 1)!;
+    const row = (box.querySelectorAll(".rows > [data-seq]") as LayoutEl[]).find(
+      (r) => r.getBoundingClientRect().bottom > top + 1,
+    )!;
     return { text: row.textContent, offset: row.getBoundingClientRect().top - top };
   }
 
