@@ -20,6 +20,8 @@ const RECORD = { id: "diag-1", workflow: "bug-hunt", ok: false, status: "error",
 interface Mounted {
   text: () => string;
   posts: { method: string; path: string; body?: unknown }[];
+  /** Open the modal on the same run again, in the same session. */
+  reopen: () => Promise<void>;
 }
 
 async function openDiagnose(response: Record<string, unknown>): Promise<Mounted> {
@@ -68,9 +70,14 @@ async function openDiagnose(response: Record<string, unknown>): Promise<Mounted>
       return 0;
     },
   });
-  (ST.modals as { openDiagnoseModal: (r: typeof RECORD) => void }).openDiagnoseModal(RECORD);
-  for (let i = 0; i < 8; i++) await Promise.resolve();
-  return { text: () => flatText(modal), posts };
+  const open = async () => {
+    // Whatever the modal shows after this, this open rendered.
+    modal.textContent = "";
+    (ST.modals as { openDiagnoseModal: (r: typeof RECORD) => void }).openDiagnoseModal(RECORD);
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+  };
+  await open();
+  return { text: () => flatText(modal), posts, reopen: open };
 }
 
 describe("diagnose modal", () => {
@@ -152,11 +159,19 @@ describe("diagnose modal", () => {
       specDrift: false,
       diagnosis: { summary: "cached", category: "unknown", confidence: "high" },
     };
-    const first = await openDiagnose(response);
-    // Re-open within the same session state would be a second modal; the cache
-    // lives on S.diagnoseCache, which a single mount owns — assert only that the
-    // first render produced the result the cache would replay.
-    expect(first.text()).toContain("cached");
-    expect(first.posts).toHaveLength(1);
+    const m = await openDiagnose(response);
+    expect(m.posts).toHaveLength(1);
+    await m.reopen();
+    expect(m.posts).toHaveLength(1);
+    expect(m.text()).toContain("cached");
+  });
+
+  it("asks again on reopen when the last attempt failed", async () => {
+    // Only a successful diagnosis is cached; a failure (no key, a timeout) is
+    // worth retrying once the reader has fixed it.
+    const m = await openDiagnose({ ok: false, error: "needs an API key" });
+    await m.reopen();
+    expect(m.posts).toHaveLength(2);
+    expect(m.text()).toContain("needs an API key");
   });
 });

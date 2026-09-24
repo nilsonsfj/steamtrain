@@ -33,12 +33,27 @@ describe("stub DOM", () => {
     expect(node.textContent).toBe("");
   });
 
-  it("finds a node by an id a script assigned", () => {
-    const { document, h } = createDom();
+  it("finds a node by an id a script assigned, in the body or a registered tree", () => {
+    const { document, h, byId } = createDom();
     const pane = h("div");
     pane.id = "runsPage";
     document.body.appendChild(pane);
     expect(document.getElementById("runsPage")).toBe(pane);
+
+    byId.modal = h("div");
+    const field = h("input");
+    field.id = "name";
+    byId.modal.appendChild(field);
+    expect(document.getElementById("name")).toBe(field);
+    byId.modal.id = "diag";
+    expect(document.getElementById("diag")).toBe(byId.modal);
+  });
+
+  it("keeps a combinator inside an attribute value as part of the value", () => {
+    const { h } = createDom();
+    const root = h("div", null, h("span", { title: "a>b" }), h("span", { title: "a" }));
+    expect(root.querySelectorAll('[title="a>b"]')).toHaveLength(1);
+    expect(root.querySelectorAll('div > [title="a>b"]')).toHaveLength(1);
   });
 
   it("refuses to insert before, or remove, a node that is not a child", () => {
