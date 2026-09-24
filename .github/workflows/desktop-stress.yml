@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     runs-on: macos-latest
     timeout-minutes: 60
     steps:
@@ -29,13 +29,13 @@ jobs:
 
       - name: Dev layout, repeated
         continue-on-error: true
-        run: bunx playwright test --project=electron --repeat-each=15
+        run: bunx playwright test --project=electron --repeat-each=20
 
       - run: bunx electron-builder --dir --publish never --arm64
 
       - name: Packaged app, repeated
         continue-on-error: true
-        run: STEAMTRAIN_E2E_APP="$(ls -d release/mac*/steamtrain.app/Contents/MacOS/steamtrain)" bunx playwright test --project=electron --repeat-each=15 --output=test-results-packaged
+        run: STEAMTRAIN_E2E_APP="$(ls -d release/mac*/steamtrain.app/Contents/MacOS/steamtrain)" bunx playwright test --project=electron --repeat-each=20 --output=test-results-packaged
 
       - uses: actions/upload-artifact@v4
         if: always()

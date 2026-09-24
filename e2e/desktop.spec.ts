@@ -1,4 +1,4 @@
-import type { ChildProcess } from "node:child_process";
+import { type ChildProcess, execSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
@@ -165,6 +165,31 @@ async function within(promise: Promise<unknown>, ms: number): Promise<void> {
   }
 }
 
+/** STRESS DIAGNOSTIC (not for merge): what is a stuck app doing? */
+function probeStuck(launched: Launched, path: string): void {
+  const pid = launched.process.pid;
+  const run = (cmd: string): string => {
+    try {
+      return execSync(cmd, { encoding: "utf8", timeout: 20_000, stdio: ["ignore", "pipe", "pipe"] });
+    } catch (err) {
+      return `(${cmd} failed: ${String(err).slice(0, 300)})`;
+    }
+  };
+  const port = /running at http:\/\/127\.0\.0\.1:(\d+)/.exec(launched.output())?.[1];
+  const parts = [
+    `== ps (group ${pid})\n${run(`ps -o pid,ppid,pgid,stat,pcpu,etime,command -g ${pid}`)}`,
+    `== ps (children)\n${run(`ps -A -o pid,ppid,pgid,stat,pcpu,etime,command | awk '$2==${pid} || $1==${pid}'`)}`,
+    `== engine /api/runs (port ${port})\n${port ? run(`curl -sS -m 3 -w ' [%{http_code} in %{time_total}s]' http://127.0.0.1:${port}/api/runs`) : "(no port)"}`,
+    `== sample\n${process.platform === "darwin" ? run(`sample ${pid} 2 -mayDie 2>&1`) : "(not darwin)"}`,
+  ];
+  const text = parts.join("\n\n");
+  writeFileSync(path, text);
+  const sample = parts[3] ?? "";
+  const graph = sample.indexOf("Call graph:");
+  const head = graph >= 0 ? sample.slice(graph).split("\n").slice(0, 160).join("\n") : sample.slice(0, 4000);
+  console.log(`\nSTUCK-PROBE pid=${pid}\n${parts.slice(0, 3).join("\n")}\n${head}`);
+}
+
 /** Neither exited nor killed by a signal. */
 function isRunning(child: ChildProcess): boolean {
   return child.exitCode === null && child.signalCode === null;
@@ -249,6 +274,7 @@ test.afterEach(async () => {
       );
       const ms = Date.now() - began.getTime();
       const stuck = isRunning(launched.process);
+      if (stuck) probeStuck(launched, testInfo.outputPath("stuck-probe.txt"));
       if (stuck) killWithEngine(launched.process);
       // STRESS DIAGNOSTIC (not for merge).
       if (ms > 4_000 || stuck || testInfo.status !== testInfo.expectedStatus) {
