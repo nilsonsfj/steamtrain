@@ -108,6 +108,12 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # Electron 42+ has no postinstall: the binary is fetched on first use.
+      # Fetch it here so a slow download is its own step, not a timeout in the
+      # first test that launches the app.
+      - name: Fetch the Electron binary
+        run: bunx install-electron
+
       - name: Ensure a display is available
         if: runner.os == 'Linux'
         run: command -v xvfb-run || (sudo apt-get update && sudo apt-get install -y xvfb)

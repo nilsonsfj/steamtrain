@@ -27,12 +27,11 @@ bun install --frozen-lockfile
 | `npm run build:electron` | Build the [desktop shell](docs/desktop-app.md) to `dist-electron/` |
 | `npm run dev:electron` | Build the CLI + shell, then launch the desktop app |
 
-`electron` is a devDependency, and installing it downloads a ~100 MB platform
-binary in a postinstall step. It is listed in `trustedDependencies` so
-`bun install` runs that step; if your Bun blocks it, `bun pm trust electron` and
-reinstall. On a constrained or offline network the download is the slow part of
-setup — everything except `build:electron` / `dev:electron` works without it,
-so it is safe to skip if you are not touching `electron/`.
+`electron` is a devDependency, but installing it no longer downloads anything:
+since Electron 42 the ~100 MB platform binary is fetched the first time
+something asks for it (`npm run dev:electron`, the desktop e2e suite). Run
+`bunx install-electron` to fetch it up front, for instance before going
+offline. Nothing outside the desktop shell and its e2e suite needs it.
 
 ## Code style
 

@@ -16,7 +16,7 @@ function deps(overrides: Partial<Pick<UncaughtDeps, "quitting" | "windowGone">> 
   };
 }
 
-/** What Electron 33 throws from its own window teardown (#266). */
+/** What Electron throws from its own window teardown (#266). */
 function teardownRace(): TypeError {
   const err = new TypeError("Object has been destroyed");
   err.stack = `${err.name}: ${err.message}\n    at BrowserWindow.visibilityChanged (node:electron/js2c/browser_init:2:13331)`;
