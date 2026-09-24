@@ -45,7 +45,7 @@ let windowOpened = false;
 // Rejections are logged too, so one cannot fall to whatever Node's mode does.
 const uncaughtDeps: UncaughtDeps = {
   quitting: () => quitting,
-  windowGone: () => windowOpened && !(mainWindow && !mainWindow.isDestroyed()),
+  windowGone: () => windowOpened && (!mainWindow || mainWindow.isDestroyed()),
   log: (text: string) => {
     // Synchronous, like `quitLog`: this is often the last thing the app says.
     try {
@@ -54,7 +54,14 @@ const uncaughtDeps: UncaughtDeps = {
       // No stderr to write to: nothing more to do.
     }
   },
-  showErrorBox: (title: string, content: string) => dialog.showErrorBox(title, content),
+  showErrorBox: (title: string, content: string) => {
+    // A throw here would land back in this handler; the error is logged already.
+    try {
+      dialog.showErrorBox(title, content);
+    } catch {
+      // Nothing more to report it with.
+    }
+  },
 };
 process.on("uncaughtException", (err) => handleUncaught(err, uncaughtDeps));
 process.on("unhandledRejection", (err) => handleUncaught(err, uncaughtDeps, "rejection"));
