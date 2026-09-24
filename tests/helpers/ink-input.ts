@@ -54,6 +54,8 @@ export async function ready(stdin: TestStdin, maxTurns = 100): Promise<void> {
  * drive through here, such as a timer firing inside the component.
  */
 export async function press(stdin: TestStdin, input: string): Promise<void> {
+  // A key sent before Ink listens is dropped in silence; once mounted this is free.
+  await ready(stdin);
   const env = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
   const previous = env.IS_REACT_ACT_ENVIRONMENT;
   env.IS_REACT_ACT_ENVIRONMENT = true;
@@ -68,7 +70,6 @@ export async function press(stdin: TestStdin, input: string): Promise<void> {
 
 /** Send keypresses in order, letting the component settle after each one. */
 export async function type(stdin: TestStdin, ...inputs: string[]): Promise<void> {
-  await ready(stdin);
   for (const input of inputs) {
     await press(stdin, input);
     await tick();

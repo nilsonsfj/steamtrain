@@ -80,8 +80,9 @@ describe("ink input helper", () => {
 
   it("shows what a write outside act() does to the next keypress", async () => {
     // `useInput` swaps in the new handler from an effect, so a keypress that
-    // arrives before the effect flushes is judged against the old state: the
-    // lost → behind the agent-manager flake, reproduced.
+    // arrives before the effect flushes is judged against the old state. That
+    // is the mechanism behind the agent-manager flake's lost →; there a loaded
+    // scheduler opened the gap, here writing synchronously does, every time.
     const onThird = vi.fn();
     const { stdin } = render(createElement(Counter, { onThird }));
     await ready(stdin);
