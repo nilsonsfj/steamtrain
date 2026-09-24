@@ -5,8 +5,7 @@
  * (st-core.js).
  *
  * All three are plain IIFEs over `window.Steamtrain`, so all three run here for
- * real: a stub namespace with an `h()` that builds inert nodes is enough to
- * paint them, read back what they rendered, and fire the click handlers they
+ * real: a stub namespace over the shared stub DOM is enough to paint them, read back what they rendered, and fire the click handlers they
  * attached. Only the paint-time invariants that live in the stylesheet
  * (hit-target size, how absent rows recede) are asserted against the CSS text.
  */
@@ -14,6 +13,16 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import {
+  type StubEl,
+  buttonsNamed,
+  byClass,
+  click,
+  createDom,
+  flatText,
+  hasClass,
+  loadScripts,
+} from "./helpers/stub-dom";
 
 const PUBLIC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "src", "web", "public");
 const shellJs = readFileSync(join(PUBLIC_DIR, "st-shell.js"), "utf8");
@@ -21,18 +30,6 @@ const settingsJs = readFileSync(join(PUBLIC_DIR, "st-settings.js"), "utf8");
 const settingsCss = readFileSync(join(PUBLIC_DIR, "settings.css"), "utf8");
 const coreJs = readFileSync(join(PUBLIC_DIR, "st-core.js"), "utf8");
 
-interface StubEl {
-  tag: string;
-  attrs: Record<string, unknown>;
-  children: StubEl[];
-  text: string;
-  listeners: Record<string, (() => void)[]>;
-  className: string;
-  textContent: string;
-  appendChild: (child: StubEl) => void;
-  addEventListener: (event: string, fn: () => void) => void;
-  classList: { add: (cls: string) => void };
-}
 interface Chip {
   cls: string;
   text: string;
@@ -46,61 +43,35 @@ interface Chip {
  */
 const LOUD = new Set(["not_authenticated", "unknown_error", "unreachable"]);
 
-/** The `h()` these modules build their DOM with, minus the DOM. */
-function el(tag: string, attrs?: Record<string, unknown>, ...kids: unknown[]): StubEl {
-  const node: StubEl = {
-    tag,
-    attrs: attrs ?? {},
-    children: [],
-    // `h()` treats a `text` attribute as textContent; children append after it.
-    text: attrs?.text == null ? "" : String(attrs.text),
-    listeners: {},
-    className: String(attrs?.class ?? ""),
-    textContent: "",
-    appendChild: (child) => node.children.push(child),
-    addEventListener: (event, fn) => {
-      const bucket = node.listeners[event] ?? [];
-      node.listeners[event] = bucket;
-      bucket.push(fn);
-    },
-    classList: { add: () => {} },
-  };
-  for (const kid of kids) {
-    if (kid == null) continue;
-    if (typeof kid === "string") node.text += kid;
-    else node.children.push(kid as StubEl);
-  }
-  return node;
-}
-
 /** Loads st-shell.js against a stub DOM and returns the chips renderHealth builds. */
 function renderChips(
   doctor: { agent: string; status: string }[],
   apis: { api: string; status: string }[],
   spec: unknown = { phases: [] },
 ): Chip[] {
-  const health = el("div");
+  const { document, h, byId } = createDom();
+  const health = h("div");
+  byId.health = health;
   const ST: Record<string, unknown> = {
     state: { spec },
-    h: el,
+    h,
     clear: (node: StubEl) => {
-      node.children = [];
+      node.textContent = "";
     },
     agentHealthMeta: (status: string) => ({ loud: LOUD.has(status) }),
     apiHealthMeta: (status: string) => ({ loud: LOUD.has(status) }),
     isCredentialFreeSpec: () => false,
   };
-  const document = { getElementById: (id: string) => (id === "health" ? health : null) };
-  new Function("window", "document", shellJs)({ Steamtrain: ST }, document);
+  loadScripts([shellJs], { window: { Steamtrain: ST }, document });
   (ST.shell as { renderHealth: (d: unknown, a: unknown, e: unknown) => void }).renderHealth(
     doctor,
     apis,
     null,
   );
   return health.children.map((chip) => ({
-    cls: String(chip.attrs.class),
-    text: chip.text,
-    title: String(chip.attrs.title),
+    cls: chip.className,
+    text: chip.textContent,
+    title: String(chip.getAttribute("title")),
   }));
 }
 
@@ -203,16 +174,6 @@ interface Mounted {
   foot: () => string;
 }
 
-/** Every descendant matching `pred`, in paint order. */
-function collect(node: StubEl, pred: (n: StubEl) => boolean, out: StubEl[] = []): StubEl[] {
-  if (pred(node)) out.push(node);
-  for (const kid of node.children) collect(kid, pred, out);
-  return out;
-}
-function flatText(node: StubEl): string {
-  return [node.text, ...node.children.map(flatText)].join(" ").replace(/\s+/g, " ").trim();
-}
-
 /**
  * Paints the real Runners section against a stub DOM. `agents`/`apis` are the
  * configured entries GET /api/config would return; PUT bodies are recorded so a
@@ -242,12 +203,13 @@ async function mountSettings(opts: {
   };
   let cadencePref = opts.cadence ?? "launch";
   const puts: Record<string, unknown>[] = [];
-  const root = el("div");
+  const { document, h } = createDom();
+  const root = h("div");
   const ST: Record<string, unknown> = {
     state: { doctor: opts.doctor ?? [], apiDoctor: opts.apiDoctor ?? [], projectConfig: null },
-    h: el,
+    h,
     clear: (node: StubEl) => {
-      node.children = [];
+      node.textContent = "";
     },
     agentHealthMeta: (status: string) => ({ loud: LOUD.has(status) }),
     apiHealthMeta: (status: string) => ({ loud: LOUD.has(status) }),
@@ -265,11 +227,11 @@ async function mountSettings(opts: {
       mbanner: (node: StubEl, text: string, kind: string) => {
         if (!text) {
           node.className = "mbanner";
-          node.text = "";
+          node.textContent = "";
           return;
         }
         node.className = `mbanner show ${kind === "err" ? "err" : "info"}`;
-        node.text = text;
+        node.textContent = text;
       },
       field: (_label: string, input: StubEl) => input,
     },
@@ -296,79 +258,74 @@ async function mountSettings(opts: {
     location: { hash: "" },
     confirm: () => true,
   };
-  new Function("window", "document", settingsJs)(window, { getElementById: () => null });
+  loadScripts([settingsJs], { window, document });
   const settings = ST.settings as { render: (c: StubEl, s: string) => void };
   settings.render(root, "runners");
   await Promise.resolve();
   await Promise.resolve();
 
   const rows = () =>
-    collect(root, (n) => n.className.split(" ").includes("runner-row")).map((row) => {
-      const acts = collect(row, (n) => n.className === "rowacts")[0];
+    byClass(root, "runner-row").map((row) => {
+      const acts = byClass(row, "rowacts")[0];
       const buttons = acts ? acts.children : [];
       return {
         cls: row.className,
         text: flatText(row),
-        actions: buttons.map((b) => b.text),
+        actions: buttons.map((b) => b.textContent),
         click: (label: string) => {
-          const btn = buttons.find((b) => b.text === label);
+          const btn = buttons.find((b) => b.textContent === label);
           if (!btn) throw new Error(`no "${label}" button on row: ${flatText(row)}`);
-          for (const fn of btn.listeners.click ?? []) fn();
+          click(btn);
         },
       };
     });
   const banner = () => {
-    const node = collect(root, (n) => String(n.className).includes("mbanner"))[0];
+    const node = byClass(root, "mbanner")[0];
     return node ? flatText(node) : "";
   };
   const save = async () => {
-    const btn = collect(root, (n) => n.text === "Save changes")[0];
-    if (!btn) throw new Error("no Save button");
-    for (const fn of btn.listeners.click ?? []) fn();
+    click(buttonsNamed(root, "Save changes")[0]);
     await Promise.resolve();
     await Promise.resolve();
   };
   const tally = () => {
-    const strip = collect(root, (n) => n.className === "runner-tally")[0];
+    const strip = byClass(root, "runner-tally")[0];
     return strip ? flatText(strip) : "";
   };
-  const navFlagged = () => collect(root, (n) => n.className.split(" ").includes("flag")).length > 0;
+  const navFlagged = () => byClass(root, "flag").length > 0;
   const sliderEl = () => {
-    const node = collect(root, (n) => n.className === "slider")[0];
+    const node = byClass(root, "slider")[0];
     if (!node) throw new Error("no concurrency slider");
     return node;
   };
   const setConcurrency = (value: number) => {
     const node = sliderEl();
-    node.attrs.value = String(value);
-    (node as unknown as { value: string }).value = String(value);
-    for (const fn of node.listeners.input ?? []) fn();
+    node.value = String(value);
+    node.fire("input");
   };
   const saveEnabled = () => {
-    const btn = collect(root, (n) => n.text === "Save changes")[0];
-    if (!btn) return false;
-    // syncRunnersFoot sets the DOM property, not the creation-time attribute.
-    return (btn as unknown as { disabled?: boolean }).disabled !== true;
+    const btn = buttonsNamed(root, "Save changes")[0];
+    return btn ? !btn.disabled : false;
   };
-  const cadenceItems = () => collect(root, (n) => n.className.split(" ").includes("seg-item"));
-  const cadence = () => cadenceItems().map((n) => n.text + (n.className.includes("on") ? "*" : ""));
+  const cadenceItems = () => byClass(root, "seg-item");
+  const cadence = () => cadenceItems().map((n) => n.textContent + (hasClass(n, "on") ? "*" : ""));
   const pickCadence = (label: string) => {
-    const btn = cadenceItems().find((n) => n.text === label);
+    const btn = cadenceItems().find((n) => n.textContent === label);
     if (!btn) throw new Error(`no cadence option "${label}"`);
-    for (const fn of btn.listeners.click ?? []) fn();
+    click(btn);
   };
   const headActions = () => {
-    const head = collect(root, (n) => n.className === "settings-head")[0];
+    const head = byClass(root, "settings-head")[0];
     if (!head) return [];
-    const acts = collect(head, (n) => n.className === "actions")[0];
-    return acts ? acts.children.map((b) => b.text) : [];
+    const acts = byClass(head, "actions")[0];
+    return acts ? acts.children.map((b) => b.textContent) : [];
   };
   const navFoot = () => {
-    const node = collect(root, (n) => n.className === "settings-navfoot")[0];
+    const node = byClass(root, "settings-navfoot")[0];
     return node ? flatText(node) : "";
   };
   const foot = () => {
-    const node = collect(root, (n) => n.className === "settings-foot")[0];
+    const node = byClass(root, "settings-foot")[0];
     return node ? flatText(node) : "";
   };
   return {
@@ -384,10 +341,7 @@ async function mountSettings(opts: {
     cadence,
     pickCadence,
     headActions,
-    cols: () =>
-      (collect(root, (n) => n.className === "runner-cols")[0]?.children ?? []).map((c) =>
-        flatText(c),
-      ),
+    cols: () => (byClass(root, "runner-cols")[0]?.children ?? []).map((c) => flatText(c)),
     navFoot,
     foot,
   };
@@ -638,17 +592,16 @@ function mountCore(opts: { cadence?: string; capability?: string } = {}) {
     live.delete(id);
   };
   const window: Record<string, unknown> = {};
-  new Function(
-    "window",
-    "document",
-    "localStorage",
-    "setInterval",
-    "clearInterval",
-    "SteamtrainReducer",
-    coreJs,
+  loadScripts([coreJs], {
+    window,
+    document: createDom().document,
+    localStorage,
+    setInterval,
+    clearInterval,
     // st-core reads a couple of reducer constants at load time; the cadence
     // path never touches the reducer, so empty stubs are enough.
-  )(window, { getElementById: () => null }, localStorage, setInterval, clearInterval, {});
+    SteamtrainReducer: {},
+  });
   const ST = window.Steamtrain as Record<string, unknown> & {
     state: Record<string, unknown>;
     healthCadence: () => string;

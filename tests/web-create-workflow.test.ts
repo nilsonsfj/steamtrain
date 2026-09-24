@@ -12,144 +12,19 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
+import {
+  type StubEl,
+  buttonsNamed,
+  byClass,
+  click,
+  createDom,
+  flatText,
+  loadScripts,
+} from "./helpers/stub-dom";
 
 const PUBLIC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "src", "web", "public");
 const modalsJs = readFileSync(join(PUBLIC_DIR, "st-modals.js"), "utf8");
 const settingsCss = readFileSync(join(PUBLIC_DIR, "settings.css"), "utf8");
-
-interface StubEl {
-  tag: string;
-  attrs: Record<string, unknown>;
-  children: StubEl[];
-  parent: StubEl | null;
-  text: string;
-  textContent: string;
-  value: string;
-  className: string;
-  disabled: boolean;
-  style: Record<string, string>;
-  listeners: Record<string, ((e?: unknown) => void)[]>;
-  appendChild: (c: StubEl) => void;
-  addEventListener: (e: string, fn: (e?: unknown) => void) => void;
-  removeChild: (c: StubEl) => void;
-  setAttribute: (k: string, v: string) => void;
-  closest: (sel: string) => StubEl | null;
-  classList: {
-    add: (c: string) => void;
-    toggle: (c: string, on: boolean) => void;
-    contains: (c: string) => boolean;
-  };
-  querySelector: (sel: string) => StubEl | null;
-  querySelectorAll: (sel: string) => StubEl[];
-  focus: () => void;
-}
-
-function matchesSel(n: StubEl, sel: string): boolean {
-  return sel.split(",").some((part) => {
-    const s = part.trim();
-    if (s.startsWith(".")) return n.className.split(" ").includes(s.slice(1));
-    return n.tag === s;
-  });
-}
-
-function el(tag: string, attrs?: Record<string, unknown>, ...kids: unknown[]): StubEl {
-  const node: StubEl = {
-    tag,
-    attrs: attrs ?? {},
-    children: [],
-    parent: null,
-    text: attrs?.text == null ? "" : String(attrs.text),
-    textContent: attrs?.text == null ? "" : String(attrs.text),
-    value: attrs?.value == null ? "" : String(attrs.value),
-    className: String(attrs?.class ?? ""),
-    disabled: false,
-    style: {},
-    listeners: {},
-    appendChild: (c) => {
-      c.parent = node;
-      node.children.push(c);
-    },
-    removeChild: (c) => {
-      node.children = node.children.filter((k) => k !== c);
-      if (c.parent === node) c.parent = null;
-    },
-    addEventListener: (event, fn) => {
-      const bucket = node.listeners[event] ?? [];
-      node.listeners[event] = bucket;
-      bucket.push(fn);
-    },
-    setAttribute: (k, v) => {
-      node.attrs[k] = v;
-    },
-    closest: (sel) => {
-      let cur: StubEl | null = node;
-      while (cur) {
-        if (matchesSel(cur, sel)) return cur;
-        cur = cur.parent;
-      }
-      return null;
-    },
-    classList: {
-      add: (c) => {
-        node.className = `${node.className} ${c}`.trim();
-      },
-      toggle: (c, on) => {
-        const parts = new Set(node.className.split(" ").filter(Boolean));
-        if (on) parts.add(c);
-        else parts.delete(c);
-        node.className = [...parts].join(" ");
-      },
-      contains: (c) => node.className.split(" ").includes(c),
-    },
-    querySelector: (sel) => descendants(node, sel)[0] ?? null,
-    querySelectorAll: (sel) => descendants(node, sel),
-    focus: () => {},
-  };
-  for (const [key, value] of Object.entries(attrs ?? {})) {
-    if (key.startsWith("on") && typeof value === "function") {
-      node.addEventListener(key.slice(2).toLowerCase(), value as () => void);
-    }
-  }
-  for (const kid of kids) {
-    if (kid == null) continue;
-    if (typeof kid === "string") node.text += kid;
-    else node.appendChild(kid as StubEl);
-  }
-  return node;
-}
-
-/** Enough of a selector engine for the tag and `.class` forms in use. */
-function descendants(root: StubEl, sel: string, out: StubEl[] = []): StubEl[] {
-  const match = (n: StubEl) =>
-    sel.startsWith(".") ? n.className.split(" ").includes(sel.slice(1)) : n.tag === sel;
-  for (const kid of root.children) {
-    if (match(kid)) out.push(kid);
-    descendants(kid, sel, out);
-  }
-  return out;
-}
-function collect(node: StubEl, pred: (n: StubEl) => boolean, out: StubEl[] = []): StubEl[] {
-  if (pred(node)) out.push(node);
-  for (const kid of node.children) collect(kid, pred, out);
-  return out;
-}
-/**
- * Text of a node and everything under it. `text` is what `h()` set from a
- * `text:` attribute; `textContent` is what a later assignment wrote (mbanner
- * and the file line both do that), so both have to be read.
- */
-function flatText(node: StubEl): string {
-  const own = node.textContent && node.textContent !== node.text ? node.textContent : node.text;
-  return [own, ...node.children.map(flatText)].join(" ").replace(/\s+/g, " ").trim();
-}
-/** Fire click on `node`, bubbling through ancestors the way a real DOM does. */
-function click(node: StubEl, target: StubEl = node): void {
-  let cur: StubEl | null = node;
-  while (cur) {
-    for (const fn of cur.listeners.click ?? []) fn({ target });
-    cur = cur.parent;
-  }
-}
 
 const BUNDLED_SPEC = {
   name: "bug-hunt",
@@ -175,6 +50,8 @@ interface Sheet {
   create: () => Promise<void>;
   banner: () => string;
   puts: { path: string; body: Record<string, unknown> }[];
+  /** Workflows the sheet opened once it had written them. */
+  opened: string[];
 }
 
 async function openSheet(opts: { workflows?: Record<string, unknown>[] } = {}): Promise<Sheet> {
@@ -183,8 +60,11 @@ async function openSheet(opts: { workflows?: Record<string, unknown>[] } = {}): 
     { name: "mine", source: "user", phaseCount: 2, stepCount: 3 },
   ];
   const puts: { path: string; body: Record<string, unknown> }[] = [];
-  const modal = el("div");
-  const overlay = el("div");
+  const opened: string[] = [];
+  const { document, h, byId } = createDom();
+  const modal = h("div");
+  byId.modal = modal;
+  byId.overlay = h("div");
   const ST: Record<string, unknown> = {
     state: {
       workflows,
@@ -202,16 +82,19 @@ async function openSheet(opts: { workflows?: Record<string, unknown>[] } = {}): 
       selected: null,
       page: null,
     },
-    h: el,
+    h,
     clear: (n: StubEl) => {
-      n.children = [];
+      n.textContent = "";
     },
     agentById: (id: string) =>
       (ST.state as { agents: Record<string, unknown>[] }).agents.find((a) => a.id === id),
     effortsFor: () => [],
     isReadOnly: () => false,
     modelsFor: () => [{ id: "sonnet", name: "sonnet" }],
-    selectWorkflow: () => {},
+    selectWorkflow: (name: string) => {
+      opened.push(name);
+    },
+    shell: { renderSidebar: () => {} },
     setRunDeepLink: () => {},
     showReauthOverlay: () => {},
     truncate: (s: string) => s,
@@ -232,23 +115,17 @@ async function openSheet(opts: { workflows?: Record<string, unknown>[] } = {}): 
       return Promise.resolve({ status: 200, body: { workflows } });
     },
   };
-  const document = {
-    getElementById: (id: string) => (id === "modal" ? modal : id === "overlay" ? overlay : null),
-    createElement: el,
-    contains: () => false,
-    body: el("body"),
-  };
-  new Function("window", "document", "setTimeout", modalsJs)(
-    { Steamtrain: ST, location: { hash: "" } },
+  loadScripts([modalsJs], {
+    window: { Steamtrain: ST, location: { hash: "" } },
     document,
-    (fn: () => void) => {
+    setTimeout: (fn: () => void) => {
       fn();
       return 0;
     },
-  );
+  });
   (ST.modals as { openCreate: () => void }).openCreate();
   const root = modal;
-  const cards = () => collect(root, (n) => n.className.split(" ").includes("create-card"));
+  const cards = () => byClass(root, "create-card");
   return {
     root,
     cards,
@@ -257,23 +134,18 @@ async function openSheet(opts: { workflows?: Record<string, unknown>[] } = {}): 
       if (!found) throw new Error(`no "${title}" card`);
       return found;
     },
-    nameInput: () => descendants(root, ".txt")[0] as StubEl,
-    description: () => descendants(root, "textarea")[0] as StubEl,
-    createButton: () =>
-      collect(
-        root,
-        (n) => n.tag === "button" && n.className.includes("create-submit"),
-      )[0] as StubEl,
-    draft: () => collect(root, (n) => n.className.split(" ").includes("draft"))[0] as StubEl,
-    fileLine: () => flatText(collect(root, (n) => n.className === "create-file")[0] ?? el("div")),
+    nameInput: () => root.querySelector(".txt") as StubEl,
+    description: () => root.querySelector("textarea") as StubEl,
+    createButton: () => root.querySelector("button.create-submit") as StubEl,
+    draft: () => root.querySelector(".draft") as StubEl,
+    fileLine: () => flatText(root.querySelector(".create-file") ?? h("div")),
     create: async () => {
-      const btn = collect(root, (n) => n.text === "Create" && n.tag === "button")[0];
-      if (!btn) throw new Error("no Create button");
-      click(btn);
+      click(buttonsNamed(root, "Create")[0]);
       for (let i = 0; i < 8; i++) await Promise.resolve();
     },
-    banner: () => flatText(collect(root, (n) => n.className.startsWith("mbanner"))[0] ?? el("div")),
+    banner: () => flatText(root.querySelector(".mbanner") ?? h("div")),
     puts,
+    opened,
   };
 }
 
@@ -305,7 +177,7 @@ describe("new-workflow sheet", () => {
   it("selects a starting point when its title text is clicked", async () => {
     const sheet = await openSheet();
     const describe = sheet.card("Describe");
-    const title = descendants(describe, ".title")[0];
+    const title = describe.querySelector(".title");
     expect(title).toBeTruthy();
     click(title as StubEl);
     expect(describe.className).toContain("selected");
@@ -315,7 +187,7 @@ describe("new-workflow sheet", () => {
   it("does not select the card when its nested select is clicked", async () => {
     const sheet = await openSheet();
     const duplicate = sheet.card("Duplicate");
-    const sel = descendants(duplicate, "select")[0];
+    const sel = duplicate.querySelector("select");
     expect(sel).toBeTruthy();
     click(sel as StubEl);
     expect(duplicate.className).not.toContain("selected");
@@ -344,6 +216,9 @@ describe("new-workflow sheet", () => {
     });
     expect(String(spec.phases[0]?.steps[0]?.prompt ?? "")).not.toBe("");
     expect(sheet.puts[0]?.body.scope).toBe("user");
+    // Once written, the sheet closes and opens the new workflow.
+    expect(sheet.root.children).toHaveLength(0);
+    expect(sheet.opened).toEqual(["flaky-tests"]);
   });
 
   it("copies the source spec under the new name for Duplicate", async () => {
@@ -404,10 +279,10 @@ describe("new-workflow sheet", () => {
       expect(progress.className).toContain("show");
       expect(flatText(progress)).toContain("Drafting your workflow");
       expect(flatText(progress)).toContain("Turning your description into a runnable pipeline");
-      expect(collect(progress, (n) => n.className.includes("draft-spinner"))).toHaveLength(1);
-      const status = collect(progress, (n) => n.className.includes("draft-status"))[0] as StubEl;
-      expect(status.attrs.role).toBe("status");
-      expect(status.attrs["aria-busy"]).toBe("true");
+      expect(byClass(progress, "draft-spinner")).toHaveLength(1);
+      const status = progress.querySelector(".draft-status") as StubEl;
+      expect(status.getAttribute("role")).toBe("status");
+      expect(status.getAttribute("aria-busy")).toBe("true");
       expect(settingsCss).toContain(".draft-spinner");
       expect(settingsCss).toContain(".btn.create-submit.is-loading");
     } finally {

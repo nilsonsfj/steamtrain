@@ -2,6 +2,16 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import {
+  type StubEl,
+  buttonsNamed,
+  byClass,
+  click,
+  collect,
+  createDom,
+  flatText,
+  loadScripts,
+} from "./helpers/stub-dom";
 
 /**
  * The "Kill step" control in the live step record (design 02.4). st-inspector.js
@@ -12,58 +22,6 @@ import { describe, expect, it } from "vitest";
 
 const PUBLIC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "src", "web", "public");
 const inspectorJs = readFileSync(join(PUBLIC_DIR, "st-inspector.js"), "utf8");
-
-interface StubEl {
-  tag: string;
-  attrs: Record<string, unknown>;
-  children: StubEl[];
-  text: string;
-  className: string;
-  disabled?: boolean;
-  listeners: Record<string, ((e?: unknown) => void)[]>;
-  appendChild: (child: StubEl) => void;
-  addEventListener: (event: string, fn: (e?: unknown) => void) => void;
-  classList: { add: () => void; toggle: () => void };
-}
-
-function el(tag: string, attrs?: Record<string, unknown>, ...kids: unknown[]): StubEl {
-  const node: StubEl = {
-    tag,
-    attrs: attrs ?? {},
-    children: [],
-    text: attrs?.text == null ? "" : String(attrs.text),
-    className: String(attrs?.class ?? ""),
-    disabled: attrs?.disabled === true,
-    listeners: {},
-    appendChild: (child) => node.children.push(child),
-    addEventListener: (event, fn) => {
-      const bucket = node.listeners[event] ?? [];
-      node.listeners[event] = bucket;
-      bucket.push(fn);
-    },
-    classList: { add: () => {}, toggle: () => {} },
-  };
-  for (const [key, value] of Object.entries(attrs ?? {})) {
-    if (key.startsWith("on") && typeof value === "function") {
-      node.addEventListener(key.slice(2).toLowerCase(), value as () => void);
-    }
-  }
-  for (const kid of kids) {
-    if (kid == null) continue;
-    if (typeof kid === "string") node.text += kid;
-    else node.children.push(kid as StubEl);
-  }
-  return node;
-}
-
-function collect(node: StubEl, pred: (n: StubEl) => boolean, out: StubEl[] = []): StubEl[] {
-  if (pred(node)) out.push(node);
-  for (const kid of node.children) collect(kid, pred, out);
-  return out;
-}
-function flatText(node: StubEl): string {
-  return [node.text, ...node.children.map(flatText)].join(" ").replace(/\s+/g, " ").trim();
-}
 
 interface Posted {
   method: string;
@@ -94,7 +52,8 @@ function mountRecord(opts: {
   const posts: Posted[] = [];
   const said: string[] = [];
   const banners: string[] = [];
-  const rail = el("aside");
+  const { document, h } = createDom();
+  const rail = h("aside");
   const ST: Record<string, unknown> = {
     state: {
       runId: opts.runId === undefined ? "run-1" : opts.runId,
@@ -110,9 +69,9 @@ function mountRecord(opts: {
       planSelection: [],
       tailScroll: {},
     },
-    h: el,
+    h,
     clear: (node: StubEl) => {
-      node.children = [];
+      node.textContent = "";
     },
     isReadOnly: () => opts.readOnly === true,
     announce: (text: string) => said.push(text),
@@ -145,26 +104,24 @@ function mountRecord(opts: {
     },
   };
 
-  new Function("window", "document", "requestAnimationFrame", inspectorJs)(
-    { Steamtrain: ST },
-    { getElementById: () => null },
-    () => 0,
-  );
+  loadScripts([inspectorJs], {
+    window: { Steamtrain: ST },
+    document,
+    requestAnimationFrame: () => 0,
+  });
   (ST.inspector as { render: (r: StubEl) => boolean }).render(rail);
 
-  const killBtn = collect(rail, (n) => n.tag === "button" && n.text === "Kill step")[0];
+  const killBtn = buttonsNamed(rail, "Kill step")[0];
   return {
     rail,
     posts,
     said,
     banners,
     killBtn,
-    footText: () => flatText(collect(rail, (n) => n.className === "insp-foot")[0] ?? el("div")),
     pill: () =>
-      flatText(collect(rail, (n) => n.className.startsWith("insp-status"))[0] ?? el("div")),
+      flatText(collect(rail, (n) => n.className.startsWith("insp-status"))[0] ?? h("div")),
     clickKill: async () => {
-      if (!killBtn) throw new Error("no Kill step button");
-      for (const fn of killBtn.listeners.click ?? []) fn();
+      click(killBtn);
       await Promise.resolve();
       await Promise.resolve();
     },

@@ -10,96 +10,10 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { type StubEl, createDom, flatText, loadScripts } from "./helpers/stub-dom";
 
 const PUBLIC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "src", "web", "public");
 const modalsJs = readFileSync(join(PUBLIC_DIR, "st-modals.js"), "utf8");
-
-interface StubEl {
-  tag: string;
-  attrs: Record<string, unknown>;
-  children: StubEl[];
-  text: string;
-  textContent: string;
-  className: string;
-  listeners: Record<string, ((e?: unknown) => void)[]>;
-  appendChild: (c: StubEl) => void;
-  addEventListener: (e: string, fn: (e?: unknown) => void) => void;
-  setAttribute: (k: string, v: string) => void;
-  classList: { add: (c: string) => void; toggle: (c: string, on: boolean) => void };
-  querySelector: (sel: string) => StubEl | null;
-  querySelectorAll: (sel: string) => StubEl[];
-  contains: (other: StubEl) => boolean;
-  focus: () => void;
-}
-
-function el(tag: string, attrs?: Record<string, unknown>, ...kids: unknown[]): StubEl {
-  const node: StubEl = {
-    tag,
-    attrs: attrs ?? {},
-    children: [],
-    text: attrs?.text == null ? "" : String(attrs.text),
-    textContent: "",
-    className: String(attrs?.class ?? ""),
-    listeners: {},
-    appendChild: (c) => node.children.push(c),
-    addEventListener: (event, fn) => {
-      const bucket = node.listeners[event] ?? [];
-      node.listeners[event] = bucket;
-      bucket.push(fn);
-    },
-    setAttribute: (k, v) => {
-      node.attrs[k] = v;
-    },
-    classList: {
-      add: (c) => {
-        node.className = `${node.className} ${c}`.trim();
-      },
-      toggle: (c, on) => {
-        const parts = new Set(node.className.split(" ").filter(Boolean));
-        if (on) parts.add(c);
-        else parts.delete(c);
-        node.className = [...parts].join(" ");
-      },
-    },
-    querySelector: (sel) => descendants(node, sel)[0] ?? null,
-    querySelectorAll: (sel) => descendants(node, sel),
-    contains: (other) => {
-      if (node === other) return true;
-      return node.children.some((k) => k === other || k.contains(other));
-    },
-    focus: () => {},
-  };
-  for (const [key, value] of Object.entries(attrs ?? {})) {
-    if (key.startsWith("on") && typeof value === "function") {
-      node.addEventListener(key.slice(2).toLowerCase(), value as () => void);
-    }
-  }
-  for (const kid of kids) {
-    if (kid == null) continue;
-    if (typeof kid === "string") node.text += kid;
-    else node.children.push(kid as StubEl);
-  }
-  return node;
-}
-
-function descendants(root: StubEl, sel: string, out: StubEl[] = []): StubEl[] {
-  const match = (n: StubEl) =>
-    sel.startsWith(".") ? n.className.split(" ").includes(sel.slice(1)) : n.tag === sel;
-  for (const kid of root.children) {
-    if (match(kid)) out.push(kid);
-    descendants(kid, sel, out);
-  }
-  return out;
-}
-function collect(node: StubEl, pred: (n: StubEl) => boolean, out: StubEl[] = []): StubEl[] {
-  if (pred(node)) out.push(node);
-  for (const kid of node.children) collect(kid, pred, out);
-  return out;
-}
-function flatText(node: StubEl): string {
-  const own = node.textContent && node.textContent !== node.text ? node.textContent : node.text;
-  return [own, ...node.children.map(flatText)].join(" ").replace(/\s+/g, " ").trim();
-}
 
 const RECORD = { id: "diag-1", workflow: "bug-hunt", ok: false, status: "error", phases: [] };
 
@@ -109,8 +23,10 @@ interface Mounted {
 }
 
 async function openDiagnose(response: Record<string, unknown>): Promise<Mounted> {
-  const modal = el("div");
-  const overlay = el("div");
+  const { document, h, byId } = createDom();
+  const modal = h("div");
+  byId.modal = modal;
+  byId.overlay = h("div");
   const posts: Mounted["posts"] = [];
   const ST: Record<string, unknown> = {
     state: {
@@ -122,9 +38,9 @@ async function openDiagnose(response: Record<string, unknown>): Promise<Mounted>
       page: null,
       diagnoseCache: {},
     },
-    h: el,
+    h,
     clear: (n: StubEl) => {
-      n.children = [];
+      n.textContent = "";
     },
     agentById: () => null,
     effortsFor: () => [],
@@ -144,21 +60,14 @@ async function openDiagnose(response: Record<string, unknown>): Promise<Mounted>
       return Promise.resolve({ status: 200, body: response });
     },
   };
-  const document = {
-    getElementById: (id: string) => (id === "modal" ? modal : id === "overlay" ? overlay : null),
-    createElement: el,
-    contains: () => false,
-    body: el("body"),
-    activeElement: null,
-  };
-  new Function("window", "document", "setTimeout", modalsJs)(
-    { Steamtrain: ST, location: { hash: "" } },
+  loadScripts([modalsJs], {
+    window: { Steamtrain: ST, location: { hash: "" } },
     document,
-    (fn: () => void) => {
+    setTimeout: (fn: () => void) => {
       fn();
       return 0;
     },
-  );
+  });
   (ST.modals as { openDiagnoseModal: (r: typeof RECORD) => void }).openDiagnoseModal(RECORD);
   for (let i = 0; i < 8; i++) await Promise.resolve();
   return { text: () => flatText(modal), posts };
