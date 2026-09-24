@@ -12,6 +12,7 @@ import { type ServerHandle, startServer } from "./server-child";
 import { resolveShellPath } from "./shell-path";
 import { performQuit } from "./shutdown";
 import { type DesktopState, createStateStore, pruneLastWorkflow } from "./store";
+import { handleUncaught } from "./uncaught";
 import { createWindow, installWebContentsGuards, showErrorPage } from "./window";
 import { restoreWindowState } from "./window-state";
 
@@ -414,6 +415,24 @@ function quitLog(step: string): void {
     // No stdout to write to (a packaged app launched from Finder): nothing to say.
   }
 }
+
+// Replaces Electron's default, a modal error box that blocks the main thread:
+// mid-quit, with no window left, that box is invisible and the quit never ends.
+process.on("uncaughtException", (err) => {
+  handleUncaught(err, {
+    quitting: () => quitting,
+    hasWindow: () => Boolean(mainWindow && !mainWindow.isDestroyed()),
+    log: (text) => {
+      // Synchronous, like `quitLog`: this is often the last thing the app says.
+      try {
+        writeSync(2, `${text}\n`);
+      } catch {
+        // No stderr to write to: nothing more to do.
+      }
+    },
+    showErrorBox: (title, content) => dialog.showErrorBox(title, content),
+  });
+});
 
 app.on("window-all-closed", () => {
   quitLog("last window closed");
