@@ -380,7 +380,9 @@ test("stops the engine and saves its window when it quits", async () => {
   expect(port).toBeGreaterThan(0);
   expect(await portAccepts(port)).toBe(true);
 
-  await app.close();
+  // Bounded like the teardown's close: a quit that stalls fails here, with the
+  // quit trail saved, rather than spending the whole test timeout.
+  await within(app.close(), 15_000);
 
   // The engine is a forked child, so nothing stops it unless `will-quit` gets
   // all the way through — the invariant that shipped broken in M1.
