@@ -1,3 +1,4 @@
+import type { ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
@@ -143,12 +144,31 @@ async function launchApp(projectArgument?: string, alsoRecent: string[] = []): P
     // An exited app's last lines can still be in the pipe; a live one has
     // nothing more to give yet, so do not wait on it.
     drained: () =>
-      pipesClosed || child.exitCode === null
+      pipesClosed || isRunning(child)
         ? Promise.resolve()
         : Promise.race([closed, new Promise<void>((done) => setTimeout(done, 2_000))]),
   };
   running.push(launched);
   return launched;
+}
+
+/** Neither exited nor killed by a signal. */
+function isRunning(child: ChildProcess): boolean {
+  return child.exitCode === null && child.signalCode === null;
+}
+
+/**
+ * SIGKILL the app and the engine it forked. Playwright starts the app as a
+ * process group leader, and the fork stays in that group; killing only the
+ * app would leave the engine serving for the rest of the suite.
+ */
+function killWithEngine(child: ChildProcess): void {
+  try {
+    if (child.pid && process.platform !== "win32") process.kill(-child.pid, "SIGKILL");
+    else child.kill("SIGKILL");
+  } catch {
+    child.kill("SIGKILL");
+  }
 }
 
 /** Is anything still listening on this port? */
@@ -196,15 +216,14 @@ test.afterEach(async () => {
       await testInfo.attach("app-output", { path, contentType: "text/plain" });
     }
     // Bounded, so an app that will not quit fails its own test and not the
-    // next one's setup too.
-    const closed = await Promise.race([
-      launched.app.close().then(
-        () => true,
-        () => true,
-      ),
-      new Promise<false>((done) => setTimeout(() => done(false), 15_000)),
+    // next one's setup too. Whatever close() reported, the process decides:
+    // one still running is killed along with the engine it forked.
+    const child = launched.app.process();
+    await Promise.race([
+      launched.app.close().catch(() => {}),
+      new Promise<void>((done) => setTimeout(done, 15_000)),
     ]);
-    if (!closed) launched.app.process().kill("SIGKILL");
+    if (isRunning(child)) killWithEngine(child);
   }
   running.length = 0;
 });

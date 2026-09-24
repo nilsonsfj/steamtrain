@@ -121,14 +121,17 @@ async function defaultCancelRun(origin: string, id: string): Promise<void> {
   });
 }
 
-/** What `promise` settles to, or `fallback` if it rejects or `ms` passes first. */
-function within<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+/**
+ * What `promise` settles to, or `fallback()` if it rejects or `ms` passes
+ * first. A thunk, so a poll that lands during the wait is what it falls back to.
+ */
+function within<T>(promise: Promise<T>, ms: number, fallback: () => T): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<T>((resolve) => {
-    timer = setTimeout(() => resolve(fallback), ms);
+    timer = setTimeout(() => resolve(fallback()), ms);
     timer.unref?.();
   });
-  return Promise.race([promise.catch(() => fallback), late]).finally(() => clearTimeout(timer));
+  return Promise.race([promise.catch(() => fallback()), late]).finally(() => clearTimeout(timer));
 }
 
 /**
@@ -178,12 +181,12 @@ export function startRunWatch(options: StartRunWatchOptions): RunWatch {
 
   return {
     activeCount: () => active,
-    refresh: () => within(poll(), deadlineMs, active),
+    refresh: () => within(poll(), deadlineMs, () => active),
     async cancelActive(): Promise<void> {
       // From a fresh list, not the snapshot: this runs at quit time, when the
       // last poll may be seconds stale and cancelling the wrong id is silent.
       // The snapshot is only the fallback for an engine that does not answer.
-      const runs = await within(fetchRuns(origin), deadlineMs, snapshot);
+      const runs = await within(fetchRuns(origin), deadlineMs, () => snapshot);
       // `allSettled`, because one run refusing to cancel must not leave the
       // others running — and the app is quitting either way.
       const cancels = Promise.allSettled(
@@ -192,7 +195,7 @@ export function startRunWatch(options: StartRunWatchOptions): RunWatch {
       await within(
         cancels.then(() => undefined),
         deadlineMs,
-        undefined,
+        () => undefined,
       );
     },
     stop: () => {
