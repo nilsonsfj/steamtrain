@@ -1,6 +1,9 @@
 import { EventEmitter } from "node:events";
-import { describe, expect, it } from "vitest";
-import { ready, tick, type } from "./helpers/ink-input";
+import { Text, useInput } from "ink";
+import { render } from "ink-testing-library";
+import { createElement, useState } from "react";
+import { describe, expect, it, vi } from "vitest";
+import { press, ready, tick, type } from "./helpers/ink-input";
 
 /**
  * The helper exists because a keypress written before Ink attaches its stdin
@@ -62,4 +65,40 @@ describe("ink input helper", () => {
     const stdin = new LateStdin(Number.POSITIVE_INFINITY);
     await expect(ready(stdin, 5)).rejects.toThrow("never attached");
   });
+
+  it("hands each keypress to the handler the previous one left behind", async () => {
+    // Back to back, with nothing in between: a keypress that reached the
+    // previous render's handler would count from a stale 0 and never get to 3.
+    const onThird = vi.fn();
+    const { stdin } = render(createElement(Counter, { onThird }));
+    await ready(stdin);
+    await press(stdin, "n");
+    await press(stdin, "n");
+    await press(stdin, "n");
+    expect(onThird).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows what a write outside act() does to the next keypress", async () => {
+    // `useInput` swaps in the new handler from an effect, so a keypress that
+    // arrives before the effect flushes is judged against the old state. That
+    // is the mechanism behind the agent-manager flake's lost →; there a loaded
+    // scheduler opened the gap, here writing synchronously does, every time.
+    const onThird = vi.fn();
+    const { stdin } = render(createElement(Counter, { onThird }));
+    await ready(stdin);
+    for (let i = 0; i < 3; i++) stdin.write("n");
+    await tick();
+    expect(onThird).not.toHaveBeenCalled();
+  });
 });
+
+/** Counts "n" presses the way most of the TUI handles keys: from a closure over state. */
+function Counter({ onThird }: { onThird: () => void }) {
+  const [count, setCount] = useState(0);
+  useInput((input) => {
+    if (input !== "n") return;
+    if (count === 2) onThird();
+    else setCount(count + 1);
+  });
+  return createElement(Text, null, String(count));
+}
