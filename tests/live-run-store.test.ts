@@ -371,7 +371,8 @@ describe("cancel watcher and approvals", () => {
     const dispose = watchRunCancel(store, "run", () => fired++, 10);
     await store.requestCancel("run");
     await vi.waitFor(() => expect(fired).toBeGreaterThan(0));
-    // Several more polls see the same marker; none of them may fire again.
+    // The watcher stops polling once it fires; a poll already in flight must
+    // not fire a second time.
     await new Promise((r) => setTimeout(r, 60));
     expect(fired).toBe(1);
     dispose();
