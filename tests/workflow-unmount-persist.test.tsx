@@ -11,7 +11,16 @@ import { type WorkflowEvent, type WorkflowSpec, workflowCacheKey } from "../src/
 type Runner = ReturnType<typeof useWorkflowRunner>;
 const spec: WorkflowSpec = {
   name: "unmount-persist",
-  phases: [{ id: "p", title: "P", steps: [{ id: "paid", kind: "command", cmd: "work" }] }],
+  phases: [
+    {
+      id: "p",
+      title: "P",
+      steps: [
+        { id: "first", kind: "command", cmd: "work" },
+        { id: "second", kind: "command", cmd: "work" },
+      ],
+    },
+  ],
 };
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -47,28 +56,31 @@ describe("a TUI run whose view unmounts", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  it("still caches a step that finished after the unmount", async () => {
+  it("still caches every step that finishes after the unmount", async () => {
     let finish: () => void = () => {};
     const finished = new Promise<void>((resolve) => {
       finish = resolve;
     });
-    let done = false;
     const orchestrator = {
       canDispatchWorkflowSpec: () => ({ ok: true }),
       getConfig: () => ({}),
       runWorkflow(): AsyncIterable<WorkflowEvent> {
         return (async function* () {
-          yield { kind: "workflow_start", name: spec.name, phaseCount: 1, stepCount: 1, ts: 0 };
-          await finished;
-          yield {
+          const stepDone = (stepId: string, ts: number): WorkflowEvent => ({
             kind: "step_done",
             phaseId: "p",
-            stepId: "paid",
-            result: { stepId: "paid", ok: true, output: "done", durationMs: 5, costUsd: 0.5 },
+            stepId,
+            result: { stepId, ok: true, output: `${stepId} done`, durationMs: 5, costUsd: 0.5 },
             cached: false,
-            ts: 1,
-          };
-          done = true;
+            ts,
+          });
+          yield { kind: "workflow_start", name: spec.name, phaseCount: 1, stepCount: 2, ts: 0 };
+          await finished;
+          yield stepDone("first", 1);
+          // Another event between the two: the drain must not stop at the
+          // first event it sees after the unmount.
+          yield { kind: "step_start", phaseId: "p", stepId: "second", ts: 2 };
+          yield stepDone("second", 3);
         })();
       },
     } as unknown as Orchestrator;
@@ -88,15 +100,17 @@ describe("a TUI run whose view unmounts", () => {
     expect(runner?.runWorkflow(spec.name, "go")).toBe(true);
     for (let i = 0; i < 100 && !runner?.wf.started; i++) await delay(10);
 
-    mountedRef.current = false; // the App goes away while the step is still running
+    mountedRef.current = false; // the App goes away while the steps are still running
     finish();
-    for (let i = 0; i < 100 && !done; i++) await delay(10);
-    await delay(50);
+    const key = workflowCacheKey(spec.name, "go", root, spec);
+    let cache = await runner!.cacheStoreRef.current.load(key);
+    for (let i = 0; i < 100 && !cache.has("second"); i++) {
+      await delay(10);
+      cache = await runner!.cacheStoreRef.current.load(key);
+    }
 
-    const cache = await runner!.cacheStoreRef.current.load(
-      workflowCacheKey(spec.name, "go", root, spec),
-    );
-    expect(cache.get("paid")?.output).toBe("done");
+    expect(cache.get("first")?.output).toBe("first done");
+    expect(cache.get("second")?.output).toBe("second done");
     view.unmount();
   });
 });
