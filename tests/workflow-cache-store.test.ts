@@ -571,7 +571,9 @@ describe("events the drivers save the cache on", () => {
     await persistCacheEvent(store, key, cache, done("bad", { ...sampleResult("bad"), ok: false }));
     expect([...(await store.load(key)).keys()]).toEqual(["a"]);
 
-    // The engine drops an entry on its own map, then says so with the event.
+    // The engine drops an entry on its own map, then says so with an event
+    // that changesCache names. An event it does not name (phase_done) must
+    // not flush the drop; workflow_done then does.
     cache.delete("a");
     await persistCacheEvent(store, key, cache, {
       kind: "phase_done",
