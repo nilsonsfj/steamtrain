@@ -5,80 +5,16 @@
  * its own recovery and is not reported again. The 401 "auth required" throw is
  * the login overlay, not a network failure.
  *
- * Mounts st-core.js against a stub document. No jsdom.
+ * Mounts st-core.js against the shared stub DOM. No jsdom.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { createDom, loadScripts } from "./helpers/stub-dom";
 
 const PUBLIC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "src", "web", "public");
 const coreJs = readFileSync(join(PUBLIC_DIR, "st-core.js"), "utf8");
-
-interface StubNode {
-  className: string;
-  textContent: string;
-  firstChild: StubNode | null;
-  classList: { contains: (cls: string) => boolean };
-  appendChild: (child: StubNode) => StubNode;
-  insertBefore: (child: StubNode, before: StubNode | null) => StubNode;
-  removeChild: (child: StubNode) => StubNode;
-  addEventListener: () => void;
-  focus: () => void;
-  setAttribute: () => void;
-  querySelector: (sel: string) => StubNode | null;
-  kids: StubNode[];
-}
-
-function stubNode(className = ""): StubNode {
-  const kids: StubNode[] = [];
-  const node = {
-    className,
-    textContent: "",
-    firstChild: null as StubNode | null,
-    kids,
-    classList: {
-      contains: (cls: string) => node.className.split(" ").includes(cls),
-    },
-    appendChild: (child: StubNode) => {
-      kids.push(child);
-      node.firstChild = kids[0] ?? null;
-      return child;
-    },
-    insertBefore: (child: StubNode, before: StubNode | null) => {
-      const at = before ? kids.indexOf(before) : kids.length;
-      kids.splice(at < 0 ? kids.length : at, 0, child);
-      node.firstChild = kids[0] ?? null;
-      return child;
-    },
-    removeChild: (child: StubNode) => {
-      const at = kids.indexOf(child);
-      if (at >= 0) kids.splice(at, 1);
-      node.firstChild = kids[0] ?? null;
-      return child;
-    },
-    addEventListener: () => {},
-    focus: () => {},
-    setAttribute: () => {},
-    querySelector: (sel: string) => {
-      const want = sel.startsWith(".") ? sel.slice(1) : sel;
-      const walk = (n: StubNode): StubNode | null => {
-        if (n.className.split(" ").includes(want)) return n;
-        for (const kid of n.kids) {
-          const hit = walk(kid);
-          if (hit) return hit;
-        }
-        return null;
-      };
-      for (const kid of kids) {
-        const hit = walk(kid);
-        if (hit) return hit;
-      }
-      return null;
-    },
-  };
-  return node;
-}
 
 interface Watched {
   // Own signatures, not Promise's: `.then()` returns another Watched, and the
@@ -105,42 +41,30 @@ interface Core {
   state: { runId: string | null; selected: string | null; announceText: string };
 }
 
-const modalBody = stubNode("mbody");
-const modal = stubNode();
-modal.appendChild(modalBody);
+const { document, h, byId } = createDom();
+const modalBody = h("div", { class: "mbody" });
+const modal = h("div", null, modalBody);
+const overlay = h("div", { class: "modal-overlay" });
+byId.modal = modal;
+byId.overlay = overlay;
+// Anything else st-core reaches for (the announcer, the banner) is a scratch node.
+const findById = document.getElementById;
+document.getElementById = (id) => findById(id) ?? h("div");
 
-const scene = { overlayOpen: false };
+function openOverlay(open: boolean) {
+  overlay.classList.toggle("show", open);
+}
 
 function loadCore(): Core {
   const window: Record<string, unknown> = {};
-  const document = {
-    body: stubNode(),
-    getElementById: (id: string) => {
-      if (id === "overlay")
-        return stubNode(scene.overlayOpen ? "modal-overlay show" : "modal-overlay");
-      if (id === "modal") return modal;
-      return stubNode();
-    },
-    createElement: () => stubNode(),
-    createTextNode: () => stubNode(),
-    querySelectorAll: () => [],
-  };
-  new Function(
-    "window",
-    "document",
-    "localStorage",
-    "setInterval",
-    "clearInterval",
-    "SteamtrainReducer",
-    coreJs,
-  )(
+  loadScripts([coreJs], {
     window,
     document,
-    { getItem: () => null, setItem: () => {} },
-    () => 1,
-    () => {},
-    {},
-  );
+    localStorage: { getItem: () => null, setItem: () => {} },
+    setInterval: () => 1,
+    clearInterval: () => {},
+    SteamtrainReducer: {},
+  });
   return window.Steamtrain as Core;
 }
 
@@ -153,9 +77,8 @@ let noted: string[] = [];
 function arm() {
   banners = [];
   noted = [];
-  scene.overlayOpen = false;
-  modalBody.kids.splice(0, modalBody.kids.length);
-  modalBody.firstChild = null;
+  openOverlay(false);
+  modalBody.textContent = "";
   ST.state.announceText = "";
   ST.state.runId = null;
   ST.state.selected = null;
@@ -177,7 +100,7 @@ beforeAll(() => {
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
-  scene.overlayOpen = false;
+  openOverlay(false);
 });
 
 async function flush() {
@@ -426,7 +349,7 @@ describe("apiAuth network failure", () => {
 
   it("also drops the failure into an open modal, which covers the cockpit banner", async () => {
     arm();
-    scene.overlayOpen = true;
+    openOverlay(true);
     rejectFetch(new TypeError("Failed to fetch"));
     ST.apiAuth("POST", "/api/history/abc/retry", {});
     await flush();

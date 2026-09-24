@@ -19,7 +19,7 @@ export type Listener = (event?: unknown) => void;
 export interface StubEvent {
   type: string;
   target: StubEl;
-  currentTarget: StubEl;
+  currentTarget: StubEl | StubDocument;
   key?: string;
   shiftKey?: boolean;
   preventDefault: () => void;
@@ -34,9 +34,6 @@ export class StubEl {
   className = "";
   value = "";
   checked = false;
-  disabled = false;
-  hidden = false;
-  open = false;
   selectionStart: number | null = null;
   selectionEnd: number | null = null;
   style: Record<string, string> = {};
@@ -52,6 +49,28 @@ export class StubEl {
       this.selectionStart = 0;
       this.selectionEnd = 0;
     }
+  }
+
+  // `disabled`, `hidden` and `open` reflect their attributes, as a browser's
+  // do, so `[disabled]` and `:not([hidden])` see what a script set. `value`
+  // and `checked` do not: in a browser they drift from the attribute too.
+  get disabled(): boolean {
+    return this.hasAttribute("disabled");
+  }
+  set disabled(on: boolean) {
+    this.toggleAttribute("disabled", on);
+  }
+  get hidden(): boolean {
+    return this.hasAttribute("hidden");
+  }
+  set hidden(on: boolean) {
+    this.toggleAttribute("hidden", on);
+  }
+  get open(): boolean {
+    return this.hasAttribute("open");
+  }
+  set open(on: boolean) {
+    this.toggleAttribute("open", on);
   }
 
   get textContent(): string {
@@ -86,6 +105,8 @@ export class StubEl {
   }
   insertBefore(c: StubEl, ref: StubEl | null): StubEl {
     if (!ref) return this.appendChild(c);
+    if (ref.parentNode !== this)
+      throw new Error("stub-dom: insertBefore's reference is not a child");
     c.parentNode?.removeChild(c);
     c.parentNode = this;
     this.children.splice(this.children.indexOf(ref), 0, c);
@@ -123,6 +144,12 @@ export class StubEl {
     delete this.attrs[k];
     if (k === "class") this.className = "";
   }
+  toggleAttribute(k: string, on?: boolean): boolean {
+    const next = on ?? !this.hasAttribute(k);
+    if (next) this.attrs[k] ??= "";
+    else this.removeAttribute(k);
+    return next;
+  }
 
   addEventListener(event: string, fn: Listener): void {
     const bucket = this.listeners[event] ?? [];
@@ -144,19 +171,31 @@ export class StubEl {
     };
     for (const fn of [...(this.listeners[event] ?? [])]) fn(e);
   }
-  /** Fire `event` here, then on each ancestor in turn, until a handler stops it. */
+  /**
+   * Fire `event` here, then on each ancestor in turn, until a handler stops
+   * it. From a node in the body it goes on to the document's own listeners.
+   */
   dispatch(event: string, init: Partial<StubEvent> = {}): void {
     let stopped = false;
+    const stopPropagation = () => {
+      stopped = true;
+    };
+    let top: StubEl = this;
     for (let node: StubEl | null = this; node && !stopped; node = node.parentNode) {
-      node.fire(event, {
-        target: this,
-        ...init,
-        currentTarget: node,
-        stopPropagation: () => {
-          stopped = true;
-        },
-      });
+      top = node;
+      node.fire(event, { target: this, ...init, currentTarget: node, stopPropagation });
     }
+    const doc = this.ownerDocument;
+    if (stopped || top !== doc.body) return;
+    const e: StubEvent = {
+      type: event,
+      target: this,
+      preventDefault() {},
+      ...init,
+      currentTarget: doc,
+      stopPropagation,
+    };
+    for (const fn of [...(doc.listeners[event] ?? [])]) fn(e);
   }
   /** A click, bubbling as a browser's does. */
   click(): void {
@@ -198,8 +237,8 @@ export class StubEl {
    * The selectors the client uses: comma lists; descendant (` `) and child
    * (`>`) combinators; compounds of a tag, `#id`, `.classes`,
    * `[attr]` / `[attr="value"]` (or single quotes) and `:not(…)` of such a
-   * compound. Anything
-   * else throws, so a test never passes on a selector it silently ignored.
+   * compound. Anything else, an empty selector included, throws, so a test
+   * never passes on a selector the stub silently ignored.
    */
   matches(sel: string): boolean {
     return splitTop(sel, ",").some((part) => matchChain(this, parseChain(part.trim())));
@@ -410,6 +449,7 @@ function parseChain(sel: string): Chain {
     chain.push({ compound: parseCompound(token, sel), combinator: " " });
     combinator = " ";
   }
+  if (chain.length === 0) throw new Error(`stub-dom: unsupported selector "${sel}"`);
   return chain;
 }
 

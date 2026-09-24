@@ -3,7 +3,7 @@
  *
  * st-arrival.js is a plain IIFE over `window.Steamtrain`, so it runs here for
  * real, the way tests/web-runs-page.test.ts runs the runs page: against the
- * shared stub DOM, with the run state comes from the real web reducer folding
+ * shared stub DOM, with the run state coming from the real web reducer folding
  * real workflow events, and the assertions read back what the page painted
  * and fire the handlers it attached. The layout invariants that only exist in
  * the stylesheet are asserted against the CSS text, and the few that live in

@@ -40,6 +40,7 @@ const BUNDLED_SPEC = {
 
 interface Sheet {
   root: StubEl;
+  overlay: StubEl;
   cards: () => StubEl[];
   card: (title: string) => StubEl;
   nameInput: () => StubEl;
@@ -64,7 +65,8 @@ async function openSheet(opts: { workflows?: Record<string, unknown>[] } = {}): 
   const { document, h, byId } = createDom();
   const modal = h("div");
   byId.modal = modal;
-  byId.overlay = h("div");
+  const overlay = h("div");
+  byId.overlay = overlay;
   const ST: Record<string, unknown> = {
     state: {
       workflows,
@@ -128,6 +130,7 @@ async function openSheet(opts: { workflows?: Record<string, unknown>[] } = {}): 
   const cards = () => byClass(root, "create-card");
   return {
     root,
+    overlay,
     cards,
     card: (title) => {
       const found = cards().find((c) => flatText(c).startsWith(title));
@@ -218,6 +221,7 @@ describe("new-workflow sheet", () => {
     expect(sheet.puts[0]?.body.scope).toBe("user");
     // Once written, the sheet closes and opens the new workflow.
     expect(sheet.root.children).toHaveLength(0);
+    expect(sheet.overlay.classList.contains("show")).toBe(false);
     expect(sheet.opened).toEqual(["flaky-tests"]);
   });
 
@@ -231,6 +235,7 @@ describe("new-workflow sheet", () => {
     expect(sheet.puts[0]?.path).toBe("/api/workflows/bug-hunt-copy");
     expect(spec.name).toBe("bug-hunt-copy");
     expect(spec.phases).toEqual(BUNDLED_SPEC.phases);
+    expect(sheet.opened).toEqual(["bug-hunt-copy"]);
   });
 
   it("kebab-cases whatever name is typed", async () => {
