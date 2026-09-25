@@ -1,6 +1,6 @@
 {
   "name": "steamtrain",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "description": "Terminal orchestrator that runs coding agents (Claude Code, Grok Build, OpenCode, Codex, Amp) as managed subprocesses and renders their activity live in an Ink TUI.",
   "license": "MIT",
   "repository": {
