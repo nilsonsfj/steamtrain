@@ -196,6 +196,104 @@ export function renderCmd(
     return renderPrompt(template, ctx, { redact: true });
   }
   const platform = options.platform ?? process.platform;
+  return platform === "win32"
+    ? renderCmdWindows(template, ctx, platform)
+    : renderCmdPosix(template, ctx, platform);
+}
+
+/**
+ * POSIX quote / substitution tracker. Unquoted `\` escapes the next character
+ * (so `\"` does not open a string). `$(...)` and backticks push a nested
+ * unquoted frame, because the shell parses a new quoting context inside them.
+ */
+interface PosixFrame {
+  quote: ShellQuoteContext;
+  extraParens: number;
+  kind: "root" | "cmdsub" | "backtick";
+}
+
+function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS.Platform): string {
+  const stack: PosixFrame[] = [{ quote: null, extraParens: 0, kind: "root" }];
+  const top = (): PosixFrame => stack[stack.length - 1]!;
+  let out = "";
+  let i = 0;
+  while (i < template.length) {
+    const frame = top();
+    const ph = template.slice(i).match(/^\{\{\s*([^{}]+?)\s*\}\}/);
+    if (ph) {
+      const value = resolveTemplateValue(ph[1]!.trim(), ctx);
+      out +=
+        value === undefined
+          ? ph[0]
+          : shellQuoteInContext(redactSecrets(value), frame.quote, platform);
+      i += ph[0].length;
+      continue;
+    }
+    const ch = template[i]!;
+    const nxt = template[i + 1];
+    if (frame.quote === "'") {
+      if (ch === "'") frame.quote = null;
+      out += ch;
+      i += 1;
+      continue;
+    }
+    if (ch === "\\" && i + 1 < template.length) {
+      out += ch + nxt;
+      i += 2;
+      continue;
+    }
+    if (frame.quote === '"') {
+      if (ch === '"') {
+        frame.quote = null;
+        out += ch;
+        i += 1;
+        continue;
+      }
+    } else if (ch === "'" || ch === '"') {
+      frame.quote = ch;
+      out += ch;
+      i += 1;
+      continue;
+    }
+    if (ch === "$" && nxt === "(") {
+      out += "$(";
+      i += 2;
+      stack.push({ quote: null, extraParens: 0, kind: "cmdsub" });
+      continue;
+    }
+    if (ch === "`") {
+      out += ch;
+      i += 1;
+      if (frame.kind === "backtick" && frame.quote === null) stack.pop();
+      else stack.push({ quote: null, extraParens: 0, kind: "backtick" });
+      continue;
+    }
+    if (frame.kind === "cmdsub" && frame.quote === null) {
+      if (ch === "(") {
+        frame.extraParens += 1;
+        out += ch;
+        i += 1;
+        continue;
+      }
+      if (ch === ")") {
+        if (frame.extraParens > 0) frame.extraParens -= 1;
+        else stack.pop();
+        out += ch;
+        i += 1;
+        continue;
+      }
+    }
+    out += ch;
+    i += 1;
+  }
+  return out;
+}
+
+function renderCmdWindows(
+  template: string,
+  ctx: TemplateContext,
+  platform: NodeJS.Platform,
+): string {
   let out = "";
   let quote: ShellQuoteContext = null;
   let i = 0;
@@ -209,28 +307,12 @@ export function renderCmd(
       continue;
     }
     const ch = template[i]!;
-    if (platform === "win32") {
-      if (quote === '"' && ch === '"' && template[i + 1] === '"') {
-        out += '""';
-        i += 2;
-        continue;
-      }
-      if (ch === '"') quote = quote === '"' ? null : '"';
-      out += ch;
-      i += 1;
-      continue;
-    }
-    if (quote === null) {
-      if (ch === "'" || ch === '"') quote = ch;
-    } else if (quote === "'") {
-      if (ch === "'") quote = null;
-    } else if (ch === "\\" && i + 1 < template.length) {
-      out += ch + template[i + 1];
+    if (quote === '"' && ch === '"' && template[i + 1] === '"') {
+      out += '""';
       i += 2;
       continue;
-    } else if (ch === '"') {
-      quote = null;
     }
+    if (ch === '"') quote = quote === '"' ? null : '"';
     out += ch;
     i += 1;
   }

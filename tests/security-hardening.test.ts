@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { isAllowedApiBaseUrl } from "../src/config/validate";
 import { redactSecrets } from "../src/util/redact";
@@ -53,6 +54,36 @@ describe("shellQuote / renderCmd", () => {
       { platform: "linux" },
     );
     expect(cmd).toBe(`echo 'it'\\''s'`);
+  });
+
+  it("does not treat a backslash-escaped quote as opening a quoted string", () => {
+    const cmd = renderCmd(
+      'printf %s \\"{{input}}\\"',
+      { input: "x; printf INJECTED", outputs: new Map() },
+      { platform: "linux" },
+    );
+    const out = execFileSync("sh", ["-c", cmd], { encoding: "utf8" });
+    // Injection runs a second printf and concatenates to `"xINJECTED"`.
+    expect(out).toBe('"x; printf INJECTED"');
+  });
+
+  it("quotes placeholders inside $(...) for the inner quoting context", () => {
+    const cmd = renderCmd(
+      "printf %s \"$(printf '{{input}}')\"",
+      { input: "x'; printf INJECTED; printf '", outputs: new Map() },
+      { platform: "linux" },
+    );
+    const out = execFileSync("sh", ["-c", cmd], { encoding: "utf8" });
+    expect(out).toBe("x'; printf INJECTED; printf '");
+  });
+
+  it("preserves newlines inside double quotes", () => {
+    const cmd = renderCmd(
+      'printf %s "{{input}}"',
+      { input: "a\nb", outputs: new Map() },
+      { platform: "linux" },
+    );
+    expect(execFileSync("sh", ["-c", cmd], { encoding: "utf8" })).toBe("a\nb");
   });
 });
 

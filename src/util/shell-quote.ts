@@ -48,5 +48,7 @@ export function shellQuoteInContext(
     return quote === '"' ? value.replace(/"/g, '""') : value;
   }
   if (quote === "'") return value.replace(/'/g, `'\\''`);
-  return value.replace(/([\\"$`])/g, "\\$1").replace(/\n/g, "\\n");
+  // A literal newline is valid inside POSIX double quotes; rewriting it as
+  // the two characters `\` `n` would change JSON, patches, and scripts.
+  return value.replace(/([\\"$`])/g, "\\$1");
 }
