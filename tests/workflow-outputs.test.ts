@@ -1,13 +1,15 @@
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runCli } from "../src/cli";
 import {
   RunRecordBuilder,
+  WORKFLOW_RUNS_DIR,
   type WorkflowDeps,
   type WorkflowEvent,
   type WorkflowSpec,
+  createLiveRunStore,
   lintTemplateRefs,
   runTimestamp,
   runWorkflow,
@@ -142,17 +144,12 @@ describe("workflow outputs: a run writes them", () => {
   it("writes an output to the default directory and reports where", async () => {
     const events = await run(reportSpec({ report: { value: "{{steps.report.output}}" } }));
     const { outputs } = done(events);
-    const started = events[0]?.kind === "workflow_start" ? events[0].ts : 0;
     expect(outputs).toHaveLength(1);
     const [report] = outputs ?? [];
     expect(report?.written).toBe(true);
-    expect(report?.path).toBe(
-      join(
-        dir,
-        ".steamtrain/outputs/hunt",
-        runTimestamp(new Date(report ? started : 0)),
-        "report.md",
-      ),
+    // The directory is named for when the run started, to the second.
+    expect(relative(dir, report?.path ?? "")).toMatch(
+      /^\.steamtrain[/\\]outputs[/\\]hunt[/\\]\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}[/\\]report\.md$/,
     );
     expect(await readFile(report?.path ?? "", "utf8")).toBe("Findings for the parser\n");
     expect(report?.bytes).toBe("Findings for the parser\n".length);
@@ -275,6 +272,24 @@ describe("workflow outputs: writing", () => {
     }
   });
 
+  it("creates nothing through a symlinked directory on the way", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "steamtrain-outputs-outside-"));
+    try {
+      await symlink(outside, join(dir, "reports"));
+      const [report] = await writeWorkflowOutputs(spec("reports/sub/deeper/x.md"), {
+        cwd: dir,
+        startedAt: Date.now(),
+        context,
+        results,
+      });
+      expect(report?.written).toBe(false);
+      expect(report?.error).toContain("refusing to write outside");
+      expect(await readdir(outside)).toEqual([]);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
   it("refuses to write through a symlink at the file itself", async () => {
     const outside = join(await mkdtemp(join(tmpdir(), "steamtrain-outputs-outside-")), "target");
     try {
@@ -368,6 +383,31 @@ describe("workflow outputs: the CLI", () => {
     expect(await readFile(join(dir, "notes/bugs.md"), "utf8")).toBe("Report on the parser\n");
   });
 
+  it("records the path --out chose, for history show", async () => {
+    await cli(["--out", "report=notes/bugs.md"]);
+    const history = await runCliText(["workflow", "history"]);
+    const id = /\b([0-9a-f-]{36})\b/.exec(history)?.[1] ?? "";
+    const shown = await runCliText(["workflow", "history", "show", id]);
+    expect(shown).toContain(`output:   report → ${join(dir, "notes/bugs.md")}`);
+  });
+
+  it("hands --out to a detached run through its launch", async () => {
+    const entry = process.argv[1];
+    // A no-op child: only the launch the parent records matters here.
+    const noop = join(dir, "noop.mjs");
+    await writeFile(noop, "process.exit(0)\n");
+    process.argv[1] = noop;
+    try {
+      const { code, stdout } = await cli(["--out", "report=notes/bugs.md", "--detach"]);
+      expect(code).toBe(0);
+      const runId = /detached run (\S+)/.exec(stdout)?.[1] ?? "";
+      const meta = await createLiveRunStore(join(dir, WORKFLOW_RUNS_DIR)).get(runId);
+      expect(meta?.launch?.outputPaths).toEqual({ report: "notes/bugs.md" });
+    } finally {
+      process.argv[1] = entry ?? "";
+    }
+  });
+
   it("refuses --out for an output the workflow does not declare", async () => {
     const { code, stderr } = await cli(["--out", "summary=x.md"]);
     expect(code).toBe(1);
@@ -409,6 +449,13 @@ describe("workflow outputs: where they show up", () => {
     expect(report?.outputs).toEqual(record.outputs);
     const [line] = arrivalOutputLines(report?.outputs ?? [], dir);
     expect(line).toMatch(/^saved report → \.steamtrain\/outputs\/hunt\/[\d_-]+\/report\.md$/);
+  });
+
+  it("shows a path relative to the run's directory only when it lies inside it", () => {
+    const saved = (path: string) => ({ key: "report", written: true, path });
+    expect(
+      arrivalOutputLines([saved("/work/app/r.md"), saved("/work/app2/r.md")], "/work/app/"),
+    ).toEqual(["saved report → r.md", "saved report → /work/app2/r.md"]);
   });
 
   it("says why an output was not saved", () => {

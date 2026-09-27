@@ -569,6 +569,8 @@ export class WorkflowRunManager {
         workflow: run.workflow,
         input: run.input,
         params: run.params,
+        // No `outputPaths`: only a CLI `--out` run has them, and the web UI
+        // hands off only the runs it started itself.
         fresh: false,
       },
     };

@@ -1,5 +1,6 @@
 import { readFile, readdir, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
+import type { WorkflowOutputResult } from "./events";
 import { atomicWriteFile, isEnoent, sanitizePathComponent } from "./fs-util";
 import {
   RUN_RECORD_VERSION,
@@ -228,6 +229,23 @@ function markLegacyInterrupted(v: Record<string, unknown>): Record<string, unkno
   return changed ? { ...v, version: 2, phases, totals: undefined } : { ...v, version: 2 };
 }
 
+/** One recorded output, with any field of the wrong type dropped; none without a key. */
+function validateOutput(o: unknown): WorkflowOutputResult[] {
+  if (!o || typeof o !== "object") return [];
+  const v = o as Record<string, unknown>;
+  if (typeof v.key !== "string" || typeof v.written !== "boolean") return [];
+  return [
+    {
+      key: v.key,
+      written: v.written,
+      description: typeof v.description === "string" ? v.description : undefined,
+      path: typeof v.path === "string" ? v.path : undefined,
+      bytes: typeof v.bytes === "number" ? v.bytes : undefined,
+      error: typeof v.error === "string" ? v.error : undefined,
+    },
+  ];
+}
+
 /** Parse + shallow-validate a record file; ignore corrupt/unmigratable files. */
 function validateRecord(file: string): RunRecord | undefined {
   let parsed: unknown;
@@ -278,14 +296,6 @@ function validateRecord(file: string): RunRecord | undefined {
     budget: r.budget && typeof r.budget === "object" ? r.budget : undefined,
     harvest: r.harvest && typeof r.harvest === "object" ? r.harvest : undefined,
     interventions: Array.isArray(r.interventions) ? r.interventions : undefined,
-    outputs: Array.isArray(r.outputs)
-      ? r.outputs.filter(
-          (o) =>
-            o &&
-            typeof o === "object" &&
-            typeof o.key === "string" &&
-            typeof o.written === "boolean",
-        )
-      : undefined,
+    outputs: Array.isArray(r.outputs) ? r.outputs.flatMap(validateOutput) : undefined,
   };
 }

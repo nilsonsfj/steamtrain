@@ -525,6 +525,7 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
         paused: false,
         pausedBy: undefined,
         editedSteps: undefined,
+        outputs: undefined,
       };
     case "phase_start": {
       const iter = e.iteration ?? 1;
