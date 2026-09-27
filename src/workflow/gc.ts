@@ -283,7 +283,10 @@ export async function listRepoWorktrees(
   }
 
   // branch -> record + recorded base commit, from history.
-  const recordByBranch = new Map<string, { record: RunRecord; baseCommit?: string }>();
+  const recordByBranch = new Map<
+    string,
+    { record: RunRecord; baseCommit?: string; stepId: string }
+  >();
   for (const record of records) {
     for (const phase of record.phases) {
       for (const step of phase.steps) {
@@ -291,6 +294,7 @@ export async function listRepoWorktrees(
           recordByBranch.set(step.worktree.branch, {
             record,
             baseCommit: step.worktree.baseCommit,
+            stepId: step.stepId,
           });
         }
       }
@@ -382,7 +386,7 @@ export async function listRepoWorktrees(
             id: recorded.record.id,
             workflow: recorded.record.workflow,
             startedAt: recorded.record.startedAt,
-            applied: Boolean(recorded.record.harvest?.appliedSteps?.length),
+            applied: Boolean(recorded.record.harvest?.appliedSteps?.includes(recorded.stepId)),
             pruned: Boolean(recorded.record.harvest?.prunedAt),
           }
         : undefined,

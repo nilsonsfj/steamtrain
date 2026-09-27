@@ -126,6 +126,31 @@ describe("repo-wide worktree GC", () => {
     expect(branches).not.toContain(lease.branch as string);
   });
 
+  it("treats applied as per-step so an unapplied sibling with changes is kept", async () => {
+    const { repo, allocate } = await makeRepo();
+    const landed = await allocate("landed", async (root) => {
+      await writeFile(join(root, "landed.txt"), "applied\n");
+    });
+    const pending = await allocate("pending", async (root) => {
+      await writeFile(join(root, "pending.txt"), "not applied\n");
+    });
+    const record = recordWithSteps(
+      repo,
+      [
+        { lease: landed, stepId: "landed" },
+        { lease: pending, stepId: "pending" },
+      ],
+      { appliedSteps: ["landed"], appliedAt: Date.now() },
+    );
+    const entries = await listRepoWorktrees(repo, [record]);
+    expect(entries.find((e) => e.branch === landed.branch)?.record?.applied).toBe(true);
+    expect(entries.find((e) => e.branch === pending.branch)?.record?.applied).toBe(false);
+
+    const result = await gcRepoWorktrees({ repoRoot: repo, records: [record], all: true });
+    expect(result.removed.map((e) => e.branch)).toEqual([landed.branch]);
+    expect(result.skipped.map((s) => s.entry.branch)).toEqual([pending.branch]);
+  });
+
   it("sees worktrees a step left on a detached head, and keeps their own commits", async () => {
     const { repo, allocate } = await makeRepo();
     // A step that rebases or checks out inside its worktree leaves a detached
@@ -267,9 +292,9 @@ async function makeRepo(): Promise<Harness> {
   };
 }
 
-function recordWith(
+function recordWithSteps(
   repo: string,
-  lease: AgentWorkspaceLease,
+  steps: { lease: AgentWorkspaceLease; stepId: string }[],
   harvest: RunRecord["harvest"],
 ): RunRecord {
   const phases: HistoryPhase[] = [
@@ -277,27 +302,25 @@ function recordWith(
       phaseId: "impl",
       title: "Implement",
       index: 0,
-      stepCount: 1,
+      stepCount: steps.length,
       done: true,
       ok: true,
-      steps: [
-        {
-          stepId: "landed",
-          blockKind: "worker",
-          agent: "claude",
-          model: "m",
-          status: "done",
-          text: "done",
-          cached: false,
-          worktree: {
-            originalCwd: repo,
-            cwd: lease.cwd,
-            root: lease.root as string,
-            branch: lease.branch as string,
-            baseCommit: lease.baseCommit,
-          },
+      steps: steps.map(({ lease, stepId }) => ({
+        stepId,
+        blockKind: "worker" as const,
+        agent: "claude",
+        model: "m",
+        status: "done" as const,
+        text: "done",
+        cached: false,
+        worktree: {
+          originalCwd: repo,
+          cwd: lease.cwd,
+          root: lease.root as string,
+          branch: lease.branch as string,
+          baseCommit: lease.baseCommit,
         },
-      ],
+      })),
     },
   ];
   return {
@@ -315,6 +338,14 @@ function recordWith(
     totals: computeRunTotals(phases),
     harvest,
   };
+}
+
+function recordWith(
+  repo: string,
+  lease: AgentWorkspaceLease,
+  harvest: RunRecord["harvest"],
+): RunRecord {
+  return recordWithSteps(repo, [{ lease, stepId: "landed" }], harvest);
 }
 
 async function cli(
