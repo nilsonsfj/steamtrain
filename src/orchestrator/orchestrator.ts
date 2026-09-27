@@ -360,11 +360,13 @@ export class Orchestrator {
      * "Max parallel runners"). Falls back to config, then the default.
      */
     maxConcurrency?: number,
+    /** Live-run id; worktrees are named under this so a crash can reclaim them. */
+    runId?: string,
   ): AsyncIterable<WorkflowEvent> {
     const spec = specOverride ?? this.listWorkflows()[name];
     if (!spec) throw new Error(`unknown workflow '${name}'`);
 
-    const agentWorkspace = createGitWorktreeManager();
+    const agentWorkspace = createGitWorktreeManager({ runId });
     const events = runWorkflow(
       spec,
       { input, cache, inputs },

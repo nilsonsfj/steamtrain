@@ -1125,6 +1125,8 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<Drive
       options.approval,
       control,
       options.humanInput,
+      undefined,
+      runId,
     )) {
       const event = asOwnWork(replayed);
       recorder.handle(event);

@@ -433,6 +433,8 @@ export function useWorkflowRunner({
             withStoreApprovals(liveStore, runId, approvalProvider),
             control,
             withStoreHumanInputs(liveStore, runId, humanInputProvider),
+            undefined,
+            runId,
           )) {
             // Mid-run detach: once ownership transfer is committed, stop
             // feeding events into the local view,

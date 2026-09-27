@@ -94,6 +94,8 @@ export interface WorkflowHost {
     humanInput?: HumanInputProvider,
     /** Per-run cap on parallel steps ("Max parallel runners"); config default when omitted. */
     maxConcurrency?: number,
+    /** Live-run id; worktrees are named under this so a crash can reclaim them. */
+    runId?: string,
   ): AsyncIterable<WorkflowEvent>;
 }
 
@@ -915,6 +917,7 @@ export class WorkflowRunManager {
         run.control,
         humanInput,
         opts.maxParallel,
+        run.id,
       )) {
         // Mid-run detach committed: stop recording, mirroring, and emitting
         // events — the detached child owns the run's record and stream from
