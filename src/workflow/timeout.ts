@@ -17,7 +17,8 @@ export const MAX_TIMEOUT_MS = 2_147_483_647;
 
 /** Convert a second-based timeout to milliseconds for timers and subprocess kills. */
 export function timeoutMsFromSec(sec: number): number {
-  if (!Number.isFinite(sec) || sec <= 0) return 0;
+  if (Number.isNaN(sec) || sec <= 0) return 0;
+  if (!Number.isFinite(sec)) return MAX_TIMEOUT_MS;
   return Math.min(MAX_TIMEOUT_MS, Math.round(sec * 1000));
 }
 
