@@ -1,5 +1,10 @@
 import { Box, Text } from "ink";
-import { type ArrivalReport, arrivalReceiptCards, formatArrivalHeadline } from "../workflow";
+import {
+  type ArrivalReport,
+  arrivalOutputLines,
+  arrivalReceiptCards,
+  formatArrivalHeadline,
+} from "../workflow";
 import { wrapOutputLines } from "./output-window";
 
 interface ArrivalReportViewProps {
@@ -10,6 +15,8 @@ interface ArrivalReportViewProps {
   workflowName?: string | null;
   /** When true, show destination key hints (TUI interactive). */
   showKeys?: boolean;
+  /** Directory saved output paths are shown relative to. */
+  cwd?: string;
 }
 
 /**
@@ -23,14 +30,18 @@ export function ArrivalReportView({
   height,
   workflowName,
   showKeys = true,
+  cwd = process.cwd(),
 }: ArrivalReportViewProps) {
   const inner = Math.max(20, width - 4);
   const headline = formatArrivalHeadline(report.receipt, workflowName);
   const cards = arrivalReceiptCards(report.receipt);
   const titleColor = report.receipt.ok ? "green" : "red";
 
-  // Fixed chrome: border(2) + kicker/hint(1) + headline(1) + cards(1) + destinations(1).
-  const chrome = 6;
+  // Where the workflow's outputs were saved, kept on screen under the body.
+  const outputLines = arrivalOutputLines(report.outputs, cwd);
+  // Fixed chrome: border(2) + kicker/hint(1) + headline(1) + cards(1) + destinations(1),
+  // plus one line per output.
+  const chrome = 6 + outputLines.length;
   const bodyBudget = Math.max(1, height - chrome);
   const heroLines = wrapOutputLines(report.hero, inner).slice(0, bodyBudget);
   const kicker = report.receipt.ok ? "End of the line · Arrival" : "Stopped short";
@@ -70,6 +81,15 @@ export function ArrivalReportView({
           </Text>
         ))}
       </Box>
+      {outputLines.map((line, i) => (
+        <Text
+          key={report.outputs[i]?.key ?? line}
+          color={report.outputs[i]?.written ? "green" : "yellow"}
+          wrap="truncate-middle"
+        >
+          {line}
+        </Text>
+      ))}
       <Box>
         {report.destinations.map((d, i) => (
           <Text key={d.id} color={i === 0 ? "cyan" : "gray"}>

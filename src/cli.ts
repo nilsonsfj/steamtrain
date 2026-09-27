@@ -497,11 +497,12 @@ export function splitDryRunArgs(args: string[]): { isDryRun: boolean; planArgs: 
     "--report",
     "--output",
     "-o",
+    "--out",
   ]);
   // --agent passes THROUGH to the plan so the dry-run preview reflects the
   // re-route it would apply (otherwise the plan would lie, showing the blocked
-  // agent). --on-approval / --report / --output are run-only and dropped.
-  const dropWithValue = new Set(["--on-approval", "--report", "--output", "-o"]);
+  // agent). --on-approval / --report / --output / --out are run-only and dropped.
+  const dropWithValue = new Set(["--on-approval", "--report", "--output", "-o", "--out"]);
   const dropBare = new Set([
     "--dry-run",
     "--fresh",
@@ -1366,6 +1367,13 @@ function printHistoryRecord(
     }
     if (bits.length > 0) out(`  harvest:  ${bits.join(" · ")}\n`);
   }
+  for (const output of record.outputs ?? []) {
+    out(
+      output.written
+        ? `  output:   ${output.key} → ${output.path}\n`
+        : `  output:   ${output.key} not saved: ${output.error ?? "unknown reason"}\n`,
+    );
+  }
   out(`  totals:   ${formatRunTotals(record.totals, { cached: true, tokens: true })}\n`);
   printModelBreakdown(modelBreakdownForRecord(record), out);
   for (const phase of record.phases) {
@@ -2113,8 +2121,8 @@ Usage:
   steamtrain workflow validate [name]
   steamtrain workflow plan <name> --input <text> [--param key=value ...] [--agent <id>] [--json]
   steamtrain workflow plan <name> --stdin [--param key=value ...] [--agent <id>] [--json]
-  steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--agent <id>] [--approve-all | --on-approval fail|stop] [--human <stepId>=<value|@file> ...] [--report json|markdown|junit [--output <file>]]
-  steamtrain workflow run <name> --stdin [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--agent <id>] [--approve-all | --on-approval fail|stop] [--human <stepId>=<value|@file> ...] [--report json|markdown|junit [--output <file>]]
+  steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--agent <id>] [--approve-all | --on-approval fail|stop] [--human <stepId>=<value|@file> ...] [--out <output>=<path> ...] [--report json|markdown|junit [--output <file>]]
+  steamtrain workflow run <name> --stdin [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--agent <id>] [--approve-all | --on-approval fail|stop] [--human <stepId>=<value|@file> ...] [--out <output>=<path> ...] [--report json|markdown|junit [--output <file>]]
   steamtrain workflow run --from <runId> [--retry-failed] [--retarget-agent <id> [--retarget-model <id>]] [--step <id> ...] [--param key=value ...] [--input <text>] [--json] [--detach]
   steamtrain workflow attach [<runId>] [--json]
   steamtrain workflow runs [--all] [--json]

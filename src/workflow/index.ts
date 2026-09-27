@@ -25,6 +25,7 @@ export {
   type StepResult,
   type ValidationResult,
   type WorkflowInputSpec,
+  type WorkflowOutputSpec,
   type WorkflowInputType,
   type ResolvedInputs,
   WORKFLOW_INPUT_TYPES,
@@ -65,6 +66,7 @@ export type {
   StepDoneEvent,
   PhaseDoneEvent,
   WorkflowDoneEvent,
+  WorkflowOutputResult,
   BudgetExceededEvent,
   ApprovalPendingEvent,
   ApprovalResolvedEvent,
@@ -307,6 +309,7 @@ export {
 } from "./timeout";
 export { BUNDLED_WORKFLOWS } from "./bundled";
 export { renderPrompt, renderCmd, lintTemplateRefs, type TemplateContext } from "./template";
+export { WORKFLOW_OUTPUTS_DIR, runTimestamp, writeWorkflowOutputs } from "./outputs";
 export {
   SHARE_FORMAT_VERSION,
   SHARE_FILE_SUFFIX,
@@ -619,6 +622,7 @@ export {
   ARRIVAL_NEXT_CANDIDATES,
   arrivalNotices,
   arrivalReceiptCards,
+  arrivalOutputLines,
   arrivalRootCause,
   buildArrivalReport,
   findArrivalStep,

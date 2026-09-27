@@ -1309,6 +1309,23 @@
         h("div", { class: "hist-input-body", text: record.input })
       ));
     }
+    // Where the workflow's declared outputs were saved: what a reader of a
+    // finished run most often came back for.
+    if (record.outputs && record.outputs.length && SteamtrainReducer.arrivalOutputLines) {
+      var outputLines = SteamtrainReducer.arrivalOutputLines(record.outputs, record.cwd);
+      var outputsBody = h("div", { class: "hist-input-body hist-outputs" });
+      record.outputs.forEach(function (o, i) {
+        outputsBody.appendChild(h("div", {
+          class: o.written ? "saved" : "not-saved",
+          text: outputLines[i],
+          title: o.path || ""
+        }));
+      });
+      holder.appendChild(h("div", { class: "hist-input-block" },
+        h("div", { class: "hist-input-label", text: "Outputs" }),
+        outputsBody
+      ));
+    }
     if (record.budget) {
       var scope = record.budget.scope === "step" && record.budget.stepId
         ? "step '" + record.budget.stepId + "'" : "workflow";

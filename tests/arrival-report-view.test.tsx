@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { ArrivalReportView } from "../src/tui/ArrivalReport";
 import type { ArrivalReport } from "../src/workflow";
 
-function report(ok = true): ArrivalReport {
+function report(ok = true, outputs: ArrivalReport["outputs"] = []): ArrivalReport {
   return {
     hero: "END OF THE LINE — tour complete for: all aboard\n\nCar details…",
     heroStepId: "arrival",
@@ -22,6 +22,7 @@ function report(ok = true): ArrivalReport {
     notices: ok
       ? []
       : [{ severity: "critical" as const, stepId: "scan", what: "scan failed", where: "boom" }],
+    outputs,
     destinations: [
       { id: "again", label: "Ride again", key: "r" },
       { id: "history", label: "See past runs", key: "h" },
@@ -48,5 +49,27 @@ describe("ArrivalReportView", () => {
     expect(frame).toContain("Stopped short");
     expect(frame).toContain("Tour stopped");
     expect(frame).not.toContain("Stopped short · Tour stopped");
+  });
+
+  it("shows where each output was saved, relative to the project, or why not", () => {
+    const { lastFrame } = render(
+      <ArrivalReportView
+        report={report(true, [
+          {
+            key: "report",
+            written: true,
+            path: "/work/app/.steamtrain/outputs/bug-hunt/r/report.md",
+          },
+          { key: "log", written: false, error: "step 'check' failed" },
+        ])}
+        width={80}
+        height={20}
+        workflowName="bug-hunt"
+        cwd="/work/app"
+      />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("saved report → .steamtrain/outputs/bug-hunt/r/report.md");
+    expect(frame).toContain("not saved log: step 'check' failed");
   });
 });

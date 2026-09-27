@@ -360,6 +360,8 @@ export class Orchestrator {
      * "Max parallel runners"). Falls back to config, then the default.
      */
     maxConcurrency?: number,
+    /** Where this run writes the workflow's declared outputs (`--out`), by key. */
+    outputPaths?: Record<string, string>,
   ): AsyncIterable<WorkflowEvent> {
     const spec = specOverride ?? this.listWorkflows()[name];
     if (!spec) throw new Error(`unknown workflow '${name}'`);
@@ -367,7 +369,7 @@ export class Orchestrator {
     const agentWorkspace = createGitWorktreeManager();
     const events = runWorkflow(
       spec,
-      { input, cache, inputs },
+      { input, cache, inputs, outputPaths },
       {
         createAdapter,
         binaries: this.config.binaries,
