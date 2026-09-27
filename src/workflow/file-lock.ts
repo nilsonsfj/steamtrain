@@ -1,4 +1,5 @@
-import { mkdir, readFile, stat, unlink, utimes, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { mkdir, readFile, rename, stat, unlink, utimes, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { dirname } from "node:path";
 import { isEnoent } from "./fs-util";
@@ -144,15 +145,26 @@ async function stealIfStale(lockPath: string, staleMs: number, nowMs: number): P
   const staleMtime = nowMs - info.mtimeMs > staleMs;
   if (!deadSameHost && !staleMtime) return false;
 
-  // Re-stat: another process may have replaced the lock since we first looked.
-  // Only delete if it is still the same inode and mtime we decided was stale.
+  // Rename off the well-known path, then drop the stolen file. Two waiters
+  // cannot both rename the same inode; the loser gets ENOENT and a winner who
+  // already wx-created a new lock at `lockPath` is untouched.
+  const stolen = `${lockPath}.${process.pid}.${randomBytes(6).toString("hex")}`;
   try {
-    const again = await stat(lockPath);
-    if (again.ino !== info.ino || again.mtimeMs !== info.mtimeMs) return false;
-  } catch (err) {
-    return isEnoent(err);
+    await rename(lockPath, stolen);
+  } catch {
+    return false;
   }
-  return removeQuietly(lockPath);
+  try {
+    const moved = await stat(stolen);
+    if (moved.ino !== info.ino) {
+      await unlink(stolen).catch(() => {});
+      return false;
+    }
+  } catch {
+    return false;
+  }
+  await unlink(stolen).catch(() => {});
+  return true;
 }
 
 async function releaseIfOwned(lockPath: string): Promise<void> {
