@@ -121,7 +121,7 @@ async function sessionCookie(origin: string, token: string): Promise<string | un
   return raw?.split(";")[0] || undefined;
 }
 
-function authHeaders(origin: string, cookie?: string, mutating = false): HeadersInit {
+function authHeaders(origin: string, cookie?: string, mutating = false): Record<string, string> {
   const headers: Record<string, string> = {};
   if (cookie) headers.cookie = cookie;
   if (mutating) headers.origin = origin;
