@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseReadyLine } from "../electron/main/server-child";
+import { engineUiUrl, parseReadyLine } from "../electron/main/server-child";
 
 /**
  * The desktop app learns its engine's ephemeral port from a single JSON line on
@@ -17,6 +17,14 @@ describe("parseReadyLine", () => {
       port: 38249,
       pid: 8692,
     });
+  });
+
+  it("parses an optional authToken and builds the UI URL with it", () => {
+    const withToken = parseReadyLine(
+      '{"steamtrain":"ready","url":"http://127.0.0.1:38249","port":38249,"pid":8692,"authToken":"abc"}',
+    );
+    expect(withToken?.authToken).toBe("abc");
+    expect(engineUiUrl(withToken!, "#run-1")).toBe("http://127.0.0.1:38249/?token=abc#run-1");
   });
 
   it("tolerates surrounding whitespace", () => {

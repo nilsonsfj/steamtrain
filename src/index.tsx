@@ -126,6 +126,7 @@ async function main(): Promise<void> {
         server,
         url,
         port: boundPort,
+        authToken: launchedAuthToken,
       } = await startWebUi({
         config,
         workspaces,
@@ -159,6 +160,7 @@ async function main(): Promise<void> {
             url,
             port: boundPort,
             pid: process.pid,
+            ...(launchedAuthToken ? { authToken: launchedAuthToken } : {}),
           })}\n`,
         );
       }

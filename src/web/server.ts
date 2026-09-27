@@ -2967,11 +2967,11 @@ export async function startWebUi(options: StartWebUiOptions): Promise<{
   const port = options.port ?? DEFAULT_WEB_PORT;
   const host = options.host ?? DEFAULT_WEB_HOST;
 
-  // Secure-by-default exposure: a non-local bind must have auth. When the
-  // operator didn't supply a token (and didn't explicitly opt out), generate
-  // one and print it — the frictionless localhost path is unaffected.
-  // --no-auth is authoritative here (the contract this function owns), not just
-  // in the CLI layer: it disables auth even if a token was also passed.
+  // Secure-by-default: generate a token whenever the operator didn't supply
+  // one and didn't pass --no-auth, including the loopback bind (another user
+  // on a shared machine can reach 127.0.0.1). --no-auth is authoritative here
+  // (the contract this function owns), not just in the CLI layer: it disables
+  // auth even if a token was also passed.
   let authToken = options.noAuth ? undefined : options.authToken;
   let readToken = options.noAuth ? undefined : options.readToken;
   const readOnly = Boolean(options.readOnly) && !options.noAuth;
@@ -2985,7 +2985,7 @@ export async function startWebUi(options: StartWebUiOptions): Promise<{
   }
   let generatedToken: string | undefined;
   let generatedKind: "full" | "read" | undefined;
-  if (!authToken && !readToken && !options.noAuth && isNonLocalHost(host)) {
+  if (!authToken && !readToken && !options.noAuth) {
     generatedToken = randomBytes(16).toString("hex");
     // A --read-only share bind auto-generates a *read* token so the printed
     // credential matches the process capability.
@@ -3191,11 +3191,13 @@ export async function startWebUi(options: StartWebUiOptions): Promise<{
     `http://${host === "0.0.0.0" || host === "::" ? "localhost" : host}:${actualPort}`,
   );
 
-  out(`\n🚂 steamtrain web UI running at ${url}\n`);
+  const openUrl = generatedToken ? `${url}/?token=${generatedToken}` : url;
+  out(`\n🚂 steamtrain web UI running at ${openUrl}\n`);
   out(`   ◈  project  ${project.name}  ·  ${project.displayPath}\n`);
   if (generatedToken) {
     const kindLabel = generatedKind === "read" ? "read-only" : "full";
-    out(`   🔒 non-local bind: auth enabled with an auto-generated ${kindLabel} token.
+    const where = isNonLocalHost(host) ? "non-local bind" : "this launch";
+    out(`   🔒 ${where}: auth enabled with an auto-generated ${kindLabel} token.
       token: ${generatedToken}
       (set your own with --auth-token / --read-token or STEAMTRAIN_AUTH_TOKEN /
        STEAMTRAIN_READ_TOKEN; pass --no-auth to disable — anyone reaching the

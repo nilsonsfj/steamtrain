@@ -29,6 +29,16 @@ export interface ServerReady {
   url: string;
   port: number;
   pid: number;
+  /** Auto-generated or configured auth token; the window loads `?token=` with it. */
+  authToken?: string;
+}
+
+/** Browser URL for this engine, with the launch token so the UI can log in. */
+export function engineUiUrl(ready: ServerReady, hash = ""): string {
+  const url = new URL(ready.url);
+  if (ready.authToken) url.searchParams.set("token", ready.authToken);
+  if (hash) url.hash = hash.startsWith("#") ? hash : `#${hash}`;
+  return url.toString();
 }
 
 /**

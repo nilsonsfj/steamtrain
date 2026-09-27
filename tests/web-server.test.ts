@@ -3758,11 +3758,13 @@ describe("startWebUi — secure-by-default exposure", () => {
     });
   });
 
-  it("stays tokenless on the default local bind", async () => {
+  it("auto-generates an auth token on the default local bind", async () => {
     const booted = await boot({ host: "127.0.0.1" });
-    expect(booted.authToken).toBeUndefined();
-    const res = await fetch(`${booted.url}/api/workflows`);
-    expect(res.status).toBe(200);
+    expect(booted.authToken).toMatch(/^[0-9a-f]{32}$/);
+    expect(booted.output()).toContain(booted.authToken!);
+    expect((await fetch(`${booted.url}/api/workflows`)).status).toBe(401);
+    const cookie = await login(booted.url, booted.authToken!);
+    expect((await fetch(`${booted.url}/api/workflows`, { headers: { cookie } })).status).toBe(200);
   });
 
   it("honors an explicit --no-auth opt-out with a warning", async () => {

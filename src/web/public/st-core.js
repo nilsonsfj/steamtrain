@@ -604,7 +604,34 @@ window.Steamtrain = (function () {
   }
 
   // ---- workflow catalog ----------------------------------------------------
+  function consumeUrlToken() {
+    try {
+      var params = new URLSearchParams(window.location.search);
+      var token = params.get("token");
+      if (!token) return false;
+      params.delete("token");
+      var next =
+        window.location.pathname +
+        (params.toString() ? "?" + params.toString() : "") +
+        window.location.hash;
+      api("POST", "/api/auth", { token: token }).then(function (r) {
+        if (r.status === 200 && r.body.ok) {
+          history.replaceState({}, "", next);
+          window.location.reload();
+        } else {
+          showLoginForm();
+        }
+      }).catch(function () {
+        showLoginForm();
+      });
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   function loadSessionThenCatalog() {
+    if (consumeUrlToken()) return;
     api("GET", "/api/session").then(function (r) {
       if (r.status === 401) { showLoginForm(); return; }
       if (r.status === 200 && r.body) {
