@@ -299,7 +299,8 @@ var SteamtrainReducer = (() => {
           pendingInputs: [],
           paused: false,
           pausedBy: void 0,
-          editedSteps: void 0
+          editedSteps: void 0,
+          outputs: void 0
         };
       case "phase_start": {
         const iter = e.iteration ?? 1;

@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
-import { isAbsolute, join, relative } from "node:path";
+import { join } from "node:path";
 import { refreshAgentCatalogCaches } from "./agents/models";
 import type { CliIO } from "./cli";
 import { message, readAll, truncateLine, unknownWorkflowMessage } from "./cli-util";
@@ -34,6 +34,7 @@ import {
   aggregateLeavesByModel,
   applyRetryStepFilter,
   applyWorkflowStepOverrides,
+  arrivalOutputLines,
   classifyRun,
   createLiveRunPublisher,
   createLiveRunStore,
@@ -2069,11 +2070,6 @@ export function printHumanEvent(
 }
 
 /**
- * A compact, end-of-run report: per-step status (with data-flow source for
- * fan-out children), duration, cache/cost, and roll-up totals. This is the CLI
- * analog of the TUI's live status header.
- */
-/**
  * Where the run's declared outputs went: the answer to "where is the report?"
  * printed last, so it is the line left on screen when the run ends.
  */
@@ -2084,19 +2080,14 @@ export function printRunOutputs(
 ): void {
   if (!outputs?.length) return;
   out("\noutputs\n");
-  for (const output of outputs) {
-    const shown = output.path ? displayPath(output.path, cwd) : undefined;
-    if (output.written) out(`  saved ${output.key} → ${shown}\n`);
-    else out(`  not saved ${output.key}: ${output.error ?? "unknown reason"}\n`);
-  }
+  for (const line of arrivalOutputLines(outputs, cwd)) out(`  ${line}\n`);
 }
 
-/** A path relative to `cwd` when it lies inside it, else absolute. */
-function displayPath(path: string, cwd: string): string {
-  const rel = relative(cwd, path);
-  return rel && !rel.startsWith("..") && !isAbsolute(rel) ? rel : path;
-}
-
+/**
+ * A compact, end-of-run report: per-step status (with data-flow source for
+ * fan-out children), duration, cache/cost, and roll-up totals. This is the CLI
+ * analog of the TUI's live status header.
+ */
 export function printRunSummary(
   results: StepResult[],
   out: (text: string) => void,

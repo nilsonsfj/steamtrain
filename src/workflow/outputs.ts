@@ -83,9 +83,9 @@ export async function writeWorkflowOutputs(
       const fromSpec = chosen === undefined && output.path !== undefined;
       if (fromSpec) await assertInside(options.cwd, path);
       await mkdir(dirname(path), { recursive: true });
-      // Checked again once its directories exist, so a symlink on the way
-      // cannot carry the file out.
-      if (fromSpec) await assertInside(options.cwd, path, { resolveLinks: true });
+      // Checked again once its directories exist, in case one was swapped
+      // for a symlink in between.
+      if (fromSpec) await assertInside(options.cwd, path);
       const text = renderPrompt(output.value, options.context, { redact: false });
       const body = text.endsWith("\n") || text === "" ? text : `${text}\n`;
       await writeFile(path, body, "utf8");
@@ -160,27 +160,36 @@ function safeSegment(value: string): string {
 }
 
 /**
- * Refuse a spec path that leads out of the run's directory or into its `.git`.
- * With `resolveLinks`, the directories are compared after following symlinks,
- * and the file itself must not be a symlink.
+ * Refuse a spec path that leads out of the run's directory or into its `.git`,
+ * compared after following symlinks, and a file that is itself a symlink. The
+ * directories that do not exist yet are judged by the deepest one that does,
+ * so a symlink on the way is caught before `mkdir` creates anything through it.
  */
-async function assertInside(
-  cwd: string,
-  path: string,
-  options: { resolveLinks?: boolean } = {},
-): Promise<void> {
+async function assertInside(cwd: string, path: string): Promise<void> {
   const refuse = (): never => {
     throw new Error(`refusing to write outside ${cwd}: ${path}`);
   };
-  const root = options.resolveLinks ? await realpath(cwd) : resolve(cwd);
-  const target = options.resolveLinks
-    ? join(await realpath(dirname(path)), basename(path))
-    : resolve(path);
+  const lexical = relative(resolve(cwd), resolve(path));
+  if (isOutside(lexical) || lexical === "") refuse();
+  const root = await realpath(cwd);
+  const target = join(await realpathOfExisting(dirname(resolve(path))), basename(path));
   const rel = relative(root, target);
   if (isOutside(rel) || rel === "") refuse();
   if (rel.split(/[\\/]/).some((segment) => segment.toLowerCase() === ".git")) refuse();
-  if (options.resolveLinks) {
-    const existing = await lstat(target).catch(() => undefined);
-    if (existing?.isSymbolicLink()) refuse();
+  const existing = await lstat(target).catch(() => undefined);
+  if (existing?.isSymbolicLink()) refuse();
+}
+
+/** `dir` with symlinks followed as far as it exists; the missing rest is appended as written. */
+async function realpathOfExisting(dir: string): Promise<string> {
+  const missing: string[] = [];
+  for (let current = dir; ; current = dirname(current)) {
+    try {
+      return join(await realpath(current), ...missing);
+    } catch (error) {
+      const parent = dirname(current);
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT" || parent === current) throw error;
+      missing.unshift(basename(current));
+    }
   }
 }

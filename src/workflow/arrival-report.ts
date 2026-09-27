@@ -506,7 +506,6 @@ export function arrivalReceiptCards(receipt: ArrivalReceipt): Array<{
   ];
 }
 
-/** One-line receipt for compact UI chrome. */
 /**
  * One line per declared output: where it was saved, or why it was not. A path
  * inside `cwd` is shown relative to it. Plain string work, no `node:path`, so
@@ -528,6 +527,7 @@ export function arrivalOutputLines(
   });
 }
 
+/** One-line receipt for compact UI chrome. */
 export function formatArrivalReceipt(receipt: ArrivalReceipt): string {
   const parts: string[] = [];
   parts.push(`${(receipt.durationMs / 1000).toFixed(1)}s`);

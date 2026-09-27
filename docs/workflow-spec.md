@@ -274,7 +274,13 @@ and web UI show the path when the run ends.
   start in the same second get separate default directories.
 - **Per run.** `--out <key>=<path>` sends one output elsewhere for one CLI run.
   That path is yours, so it may be anywhere; a relative one resolves against
-  the directory the run starts in.
+  the directory the run starts in. `--dry-run` ignores `--out`, as it does the
+  other run-only flags: a plan writes nothing.
+
+Output files are kept. History keeps only the latest runs, and
+`workflow history clear` deletes the records, but neither removes the files
+the runs saved: they are the reports you ran the workflow for. Delete
+`.steamtrain/outputs/` yourself when you no longer need them.
 
 ## Phase fields
 
@@ -1834,12 +1840,16 @@ catches steamtrain-specific references that will silently render as empty.
   step (its conflict resolver has to edit the conflicted files).
 - Input names must be identifiers (`[a-zA-Z_][a-zA-Z0-9_-]*`). `type: "enum"`
   requires `choices`. `fallbackModels` is only valid on `type: "model"`.
+- Output names must be identifiers (`[a-zA-Z_][a-zA-Z0-9_-]*`) and `value` must
+  not be empty. An output `path` must be relative, may not contain `..` or a
+  `.git` segment, and may use only the `{{workflow}}`, `{{run.timestamp}}` and
+  declared `{{inputs.<key>}}` placeholders.
 
 ### Template validation
 
 `workflow validate` and `workflow run` check every `{{…}}` template reference
 in prompts, distributor items, gate conditions, merge fields, command `cmd`,
-and workflow `input` templates. References that match steamtrain-specific
+workflow `input` templates and output `value` templates. References that match steamtrain-specific
 patterns but point to something invalid produce **warnings** (the workflow
 still runs, but the reference will silently render as empty):
 

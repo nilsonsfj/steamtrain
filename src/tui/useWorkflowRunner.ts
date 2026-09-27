@@ -501,6 +501,8 @@ export function useWorkflowRunner({
                   input: handoff.launch.input,
                   params: handoff.launch.params,
                   spec: handoff.launch.spec,
+                  // No `outputPaths`: only a CLI `--out` run has them, and
+                  // the TUI hands off only the runs it started itself.
                   fresh: false,
                 },
               });
