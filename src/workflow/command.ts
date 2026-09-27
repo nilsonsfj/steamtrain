@@ -91,10 +91,15 @@ export async function runShellCommand(
       return;
     }
 
+    const pgid = child.pid;
     const killTree = (sig: NodeJS.Signals): void => {
       try {
-        if (process.platform !== "win32" && typeof child.pid === "number") {
-          process.kill(-child.pid, sig);
+        if (process.platform !== "win32" && typeof pgid === "number") {
+          try {
+            process.kill(-pgid, sig);
+          } catch {
+            child.kill(sig);
+          }
         } else {
           child.kill(sig);
         }
@@ -109,7 +114,12 @@ export async function runShellCommand(
     let killTimer: NodeJS.Timeout | undefined;
     const terminate = (): void => {
       killTree("SIGTERM");
-      killTimer ??= setTimeout(() => killTree("SIGKILL"), opts.killGraceMs ?? 5000);
+      killTimer ??= setTimeout(() => {
+        killTree("SIGKILL");
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        finish(undefined);
+      }, opts.killGraceMs ?? 5000);
       killTimer.unref();
     };
 
@@ -146,10 +156,11 @@ export async function runShellCommand(
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
-      // Clear the pending SIGKILL escalation so it can't fire after the
-      // process already exited (PID/PGID-reuse window).
-      if (killTimer) clearTimeout(killTimer);
       if (closeTimer) clearTimeout(closeTimer);
+      // Keep SIGKILL armed when we asked the tree to die: the shell can exit
+      // while a SIGTERM-immune grandchild still holds the worktree. Clear the
+      // timer only on a natural close, so a reused PGID is not killed later.
+      if (killTimer && !timedOut && !cancelled) clearTimeout(killTimer);
       opts.signal?.removeEventListener("abort", onAbort);
       let output = Buffer.concat(chunks).toString("utf8");
       if (output.length > MAX_COMMAND_OUTPUT_BYTES) {
@@ -169,8 +180,11 @@ export async function runShellCommand(
     });
     child.on("exit", (code) => {
       // A backgrounded grandchild can keep stdout/stderr open after the shell
-      // exits, so 'close' never fires. Wait briefly, then drop the pipes.
+      // exits, so 'close' never fires. Wait briefly, then drop the pipes —
+      // unless we are already escalating a timeout/cancel kill; destroying
+      // stdio would resolve the step before SIGKILL reaches the grandchild.
       closeTimer = setTimeout(() => {
+        if ((timedOut || cancelled) && killTimer) return;
         child.stdout?.destroy();
         child.stderr?.destroy();
         finish(code ?? undefined);

@@ -695,6 +695,28 @@ describe("runShellCommand", () => {
     expect(result.cancelled).toBe(false);
   });
 
+  it("SIGKILLs a SIGTERM-immune grandchild after timeout even once the shell has exited", async () => {
+    const cwd = await tempDir();
+    const pidFile = join(cwd, "bg.pid");
+    const started = Date.now();
+    const result = await runShellCommand(
+      `(node -e 'process.on("SIGTERM",()=>{}); require("fs").writeFileSync(process.argv[1], String(process.pid)); setInterval(()=>{}, 1000)' "${pidFile}" &); sleep 30`,
+      { cwd, timeoutMs: 200, killGraceMs: 400 },
+    );
+    expect(result.timedOut).toBe(true);
+    expect(Date.now() - started).toBeLessThan(4000);
+    const pid = Number((await readFile(pidFile, "utf8")).trim());
+    expect(pid).toBeGreaterThan(0);
+    await new Promise((r) => setTimeout(r, 600));
+    let alive = true;
+    try {
+      process.kill(pid, 0);
+    } catch (err) {
+      alive = (err as NodeJS.ErrnoException).code !== "ESRCH";
+    }
+    expect(alive).toBe(false);
+  });
+
   it("does not hang when a background grandchild keeps stdout open", async () => {
     const cwd = await tempDir();
     const pidFile = join(cwd, "bg.pid");
