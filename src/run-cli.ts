@@ -746,7 +746,7 @@ export async function runDetachedRunner(
     err(`unknown detached run '${runId}' (no launch metadata)\n`);
     return 1;
   }
-  await store.update(runId, { pid: process.pid });
+  await store.update(runId, { pid: process.pid, heartbeatAt: Date.now() });
 
   // Crash safety: this process OWNS the run — an uncaught exception or
   // unhandled rejection must settle the registry entry as errored instead of

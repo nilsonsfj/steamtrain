@@ -207,7 +207,13 @@ export function isLiveRunOwnerAlive(
   meta: Pick<LiveRunMeta, "pid" | "createdAt" | "heartbeatAt">,
   at: number = Date.now(),
 ): boolean {
-  if (meta.pid === -1) return at - meta.createdAt <= LIVE_RUN_ORPHAN_GRACE_MS;
+  if (meta.pid === -1) {
+    // Handoff resets heartbeatAt (not createdAt, which is queue order) so a
+    // long-running run that detaches is not swept as dead during the pid:-1
+    // window. Fall back to createdAt for a freshly spawned detached child.
+    const origin = Math.max(meta.createdAt, meta.heartbeatAt ?? 0);
+    return at - origin <= LIVE_RUN_ORPHAN_GRACE_MS;
+  }
   if (!isPidAlive(meta.pid)) return false;
   if (typeof meta.heartbeatAt === "number") {
     return at - meta.heartbeatAt <= LIVE_RUN_HEARTBEAT_STALE_MS;
