@@ -467,6 +467,8 @@ export function useWorkflowRunner({
           runError = message(err);
           if (mountedRef.current) setWfNotice(`run failed: ${runError}`);
         } finally {
+          const wasAborted = ac.signal.aborted;
+          ac.abort();
           if (timeoutTimer) clearTimeout(timeoutTimer);
           approvalResolversRef.current.clear();
           humanInputResolversRef.current.clear();
@@ -482,7 +484,7 @@ export function useWorkflowRunner({
           // record now) and re-attach so the user keeps watching it live.
           const handoff = handoffRef.current;
           const handingOff = Boolean(
-            handoff && handoff.runId === runId && handoff.committed && ac.signal.aborted,
+            handoff && handoff.runId === runId && handoff.committed && wasAborted,
           );
           let handedOff = false;
           if (handingOff && handoff) {
@@ -539,11 +541,7 @@ export function useWorkflowRunner({
           }
 
           if (!handedOff) {
-            const status = ac.signal.aborted
-              ? "canceled"
-              : runError || !workflowOk
-                ? "error"
-                : "done";
+            const status = wasAborted ? "canceled" : runError || !workflowOk ? "error" : "done";
             // Settle the live-run mirror (flush events, then terminal meta) so
             // cross-UI tailers see the complete stream. Best-effort.
             try {

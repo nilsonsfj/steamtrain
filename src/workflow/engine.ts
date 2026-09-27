@@ -384,6 +384,29 @@ export async function* runWorkflow(
   if (!bound.ok) throw new Error(`cannot resolve model bindings: ${bound.error}`);
   const runnableSpec = bound.spec;
 
+  const runAbort = new AbortController();
+  const onExternalAbort = (): void => runAbort.abort();
+  if (signal) {
+    if (signal.aborted) runAbort.abort();
+    else signal.addEventListener("abort", onExternalAbort, { once: true });
+  }
+
+  try {
+    yield* runWorkflowBody(runnableSpec, spec, ctx, deps, runAbort.signal, bound.resolutions);
+  } finally {
+    signal?.removeEventListener("abort", onExternalAbort);
+    runAbort.abort();
+  }
+}
+
+async function* runWorkflowBody(
+  runnableSpec: WorkflowSpec,
+  spec: WorkflowSpec,
+  ctx: WorkflowRunContext,
+  deps: WorkflowDeps,
+  signal: AbortSignal,
+  bindingResolutions: StepBindingResolution[],
+): AsyncGenerator<WorkflowEvent> {
   const cache = ctx.cache ?? new Map<string, StepResult>();
   const outputs = new Map<string, string>();
   const results = new Map<string, StepResult>();
@@ -431,7 +454,7 @@ export async function* runWorkflow(
     startedSteps: new Set<string>(),
     ranLive: new Set<string>(),
     pauseState: { acked: false },
-    bindingResolutions: bound.resolutions,
+    bindingResolutions,
     inFlight: new Map<string, InFlightStep>(),
     killedSteps: new Map<string, string | undefined>(),
   };

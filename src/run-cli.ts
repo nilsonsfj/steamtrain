@@ -1165,6 +1165,7 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<Drive
     }
     throw runErr;
   } finally {
+    ac.abort();
     if (timeoutTimer) clearTimeout(timeoutTimer);
     disposeSignals();
     disposeCancelWatch();

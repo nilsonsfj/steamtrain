@@ -962,6 +962,7 @@ export class WorkflowRunManager {
         run.error = err instanceof Error ? err.message : String(err);
       }
     } finally {
+      run.controller.abort();
       if (run.timeoutTimer) clearTimeout(run.timeoutTimer);
       run.queued = false;
       run.pendingApprovals.clear();
