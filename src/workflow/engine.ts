@@ -272,6 +272,9 @@ interface RunEnv {
   ctx: WorkflowRunContext;
   deps: WorkflowDeps;
   signal?: AbortSignal;
+  abortRun: AbortController;
+  /** In-flight scheduler work; closed generators await this after aborting. */
+  drain: Promise<unknown>[];
   cache: Map<string, StepResult>;
   outputs: Map<string, string>;
   results: Map<string, StepResult>;
@@ -392,7 +395,7 @@ export async function* runWorkflow(
   }
 
   try {
-    yield* runWorkflowBody(runnableSpec, spec, ctx, deps, runAbort.signal, bound.resolutions);
+    yield* runWorkflowBody(runnableSpec, spec, ctx, deps, runAbort, bound.resolutions);
   } finally {
     signal?.removeEventListener("abort", onExternalAbort);
     runAbort.abort();
@@ -404,9 +407,10 @@ async function* runWorkflowBody(
   spec: WorkflowSpec,
   ctx: WorkflowRunContext,
   deps: WorkflowDeps,
-  signal: AbortSignal,
+  abortRun: AbortController,
   bindingResolutions: StepBindingResolution[],
 ): AsyncGenerator<WorkflowEvent> {
+  const signal = abortRun.signal;
   const cache = ctx.cache ?? new Map<string, StepResult>();
   const outputs = new Map<string, string>();
   const results = new Map<string, StepResult>();
@@ -438,6 +442,8 @@ async function* runWorkflowBody(
     ctx,
     deps,
     signal,
+    abortRun,
+    drain: [],
     cache,
     outputs,
     results,
@@ -465,38 +471,43 @@ async function* runWorkflowBody(
     killStep: (stepId, by) => killInFlightStep(env, stepId, by),
   });
 
-  const workflowOk = specHasLoopGates(runnableSpec)
-    ? yield* runPhasedScheduler(env)
-    : yield* runDagScheduler(env);
+  try {
+    const workflowOk = specHasLoopGates(runnableSpec)
+      ? yield* runPhasedScheduler(env)
+      : yield* runDagScheduler(env);
 
-  // Drain any control events accepted in the final scheduling window so every
-  // intervention lands in the record even when the run ends right after it.
-  yield* drainControlEvents(env);
-  deps.control?.notifyFinished();
+    // Drain any control events accepted in the final scheduling window so every
+    // intervention lands in the record even when the run ends right after it.
+    yield* drainControlEvents(env);
+    deps.control?.notifyFinished();
 
-  // `allResults` accumulates one entry per step per loop iteration (a body
-  // step that ran 3 passes has 3 entries, plus 3 intermediate "not yet
-  // converged" gate results). Downstream consumers — the CLI/web run summary,
-  // cost roll-ups — would otherwise double-count every intermediate pass. Keep
-  // only the latest result per step id (the final state of each step); earlier
-  // iterations were superseded by re-runs. Their spend was not superseded,
-  // though — every pass was billed — so it rolls into the kept result, or the
-  // run's cost summary would report only the final pass of each loop. Only
-  // spend rolls up: `durationMs` stays the final pass's, since the summary's
-  // per-step time describes the state it lists, not the loop's wall clock.
-  const finalResults = new Map<string, StepResult>();
-  for (const r of env.allResults) {
-    const earlier = finalResults.get(r.stepId);
-    finalResults.set(r.stepId, earlier ? { ...r, ...addSpend(earlier, r) } : r);
+    // `allResults` accumulates one entry per step per loop iteration (a body
+    // step that ran 3 passes has 3 entries, plus 3 intermediate "not yet
+    // converged" gate results). Downstream consumers — the CLI/web run summary,
+    // cost roll-ups — would otherwise double-count every intermediate pass. Keep
+    // only the latest result per step id (the final state of each step); earlier
+    // iterations were superseded by re-runs. Their spend was not superseded,
+    // though — every pass was billed — so it rolls into the kept result, or the
+    // run's cost summary would report only the final pass of each loop. Only
+    // spend rolls up: `durationMs` stays the final pass's, since the summary's
+    // per-step time describes the state it lists, not the loop's wall clock.
+    const finalResults = new Map<string, StepResult>();
+    for (const r of env.allResults) {
+      const earlier = finalResults.get(r.stepId);
+      finalResults.set(r.stepId, earlier ? { ...r, ...addSpend(earlier, r) } : r);
+    }
+
+    yield {
+      kind: "workflow_done",
+      ok: workflowOk && !signal?.aborted && !env.budgetState.exceeded,
+      results: [...finalResults.values()],
+      budgetExceeded: env.budgetState.exceeded,
+      ts: Date.now(),
+    };
+  } finally {
+    abortRun.abort();
+    await Promise.allSettled(env.drain);
   }
-
-  yield {
-    kind: "workflow_done",
-    ok: workflowOk && !signal?.aborted && !env.budgetState.exceeded,
-    results: [...finalResults.values()],
-    budgetExceeded: env.budgetState.exceeded,
-    ts: Date.now(),
-  };
 }
 
 /** Sum leaf-step cost across cached results, so a resumed run counts prior spend. */
@@ -955,9 +966,16 @@ async function* runPhasedScheduler(env: RunEnv): AsyncGenerator<WorkflowEvent, b
       },
       signal,
     ).finally(() => channel.close());
+    env.drain.push(poolDone);
 
-    for await (const ev of channel) yield ev;
-    await poolDone;
+    let phaseCompleted = false;
+    try {
+      for await (const ev of channel) yield ev;
+      phaseCompleted = true;
+    } finally {
+      if (!phaseCompleted) env.abortRun.abort();
+      await poolDone;
+    }
 
     yield { kind: "phase_done", phaseId: phase.id, ok: phaseOk, iteration, ts: Date.now() };
 
@@ -1161,9 +1179,16 @@ async function* runDagScheduler(env: RunEnv): AsyncGenerator<WorkflowEvent, bool
       await Promise.race(waiters);
     }
   })().finally(() => channel.close());
+  env.drain.push(driver);
 
-  for await (const ev of channel) yield ev;
-  await driver;
+  let completed = false;
+  try {
+    for await (const ev of channel) yield ev;
+    completed = true;
+  } finally {
+    if (!completed) env.abortRun.abort();
+    await driver;
+  }
 
   if (signal?.aborted) workflowOk = false;
   return workflowOk;

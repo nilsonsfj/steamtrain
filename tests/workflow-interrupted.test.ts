@@ -152,14 +152,11 @@ describe("closing the workflow generator", () => {
     }
     const pid = Number(readFileSync(pidFile, "utf8").trim());
     expect(pid).toBeGreaterThan(0);
-    await vi.waitFor(() => {
-      try {
-        process.kill(pid, 0);
-        throw new Error("command still alive");
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === "ESRCH") return;
-        throw err;
-      }
-    });
+    try {
+      process.kill(pid, 0);
+      expect.fail("command still alive after the generator closed");
+    } catch (err) {
+      expect((err as NodeJS.ErrnoException).code).toBe("ESRCH");
+    }
   });
 });
