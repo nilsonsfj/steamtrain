@@ -175,7 +175,9 @@ function loadConfigFile(path: string, scope: ConfigScope, base: SteamtrainConfig
     };
   }
 
-  const { config, warnings } = mergeConfig(base, result.data);
+  const { config, warnings } = mergeConfig(base, result.data, {
+    trustExecutables: scope.kind === "custom",
+  });
   return {
     config,
     scope,
@@ -222,12 +224,44 @@ function mergeTimeoutFields(
 export function mergeConfig(
   base: SteamtrainConfig,
   override: ConfigFile,
+  options: { trustExecutables?: boolean } = {},
 ): { config: SteamtrainConfig; warnings: string[] } {
+  const trust = options.trustExecutables !== false;
+  const warnings: string[] = [];
+  let binaries = { ...base.binaries, ...override.binaries };
+  let agents = mergeAgentLists(base.agents, override.agents);
+  let apis = mergeInstanceLists(base.apis, override.apis);
+  if (!trust) {
+    binaries = { ...base.binaries };
+    if (override.binaries && Object.keys(override.binaries).length > 0) {
+      warnings.push(
+        "project steamtrain.json `binaries` ignored until the project is trusted (use ~/.steamtrain/config.json or --config-file)",
+      );
+    }
+    if (override.agents?.some((agent) => agent.binary)) {
+      agents = mergeAgentLists(
+        base.agents,
+        override.agents.map(({ binary: _binary, ...rest }) => rest),
+      );
+      warnings.push(
+        "project steamtrain.json agent `binary` paths ignored until the project is trusted",
+      );
+    }
+    if (override.apis?.some((api) => api.baseUrl || api.apiKeyEnv)) {
+      apis = mergeInstanceLists(
+        base.apis,
+        override.apis.map(({ baseUrl: _baseUrl, apiKeyEnv: _apiKeyEnv, ...rest }) => rest),
+      );
+      warnings.push(
+        "project steamtrain.json API `baseUrl`/`apiKeyEnv` ignored until the project is trusted",
+      );
+    }
+  }
   const merged: SteamtrainConfig = {
     name: override.name ?? base.name,
-    binaries: { ...base.binaries, ...override.binaries },
-    agents: mergeAgentLists(base.agents, override.agents),
-    apis: mergeInstanceLists(base.apis, override.apis),
+    binaries,
+    agents,
+    apis,
     modelClasses: mergeModelClasses(base.modelClasses, override.modelClasses),
     ...mergeTimeoutFields(base, override),
     maxConcurrency: override.maxConcurrency ?? base.maxConcurrency,
@@ -239,7 +273,7 @@ export function mergeConfig(
 
   const { workflows, warning } = mergeWorkflowMap({}, {}, override.workflows, "project");
   if (Object.keys(workflows).length > 0) merged.workflows = workflows;
-  const warnings = warning ? [warning] : [];
+  if (warning) warnings.push(warning);
   return { config: merged, warnings };
 }
 
