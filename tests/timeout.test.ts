@@ -72,6 +72,11 @@ describe("timeout resolution", () => {
     expect(timeoutMsFromSec(900)).toBe(900_000);
   });
 
+  it("clamps millisecond conversion to the setTimeout maximum", () => {
+    expect(timeoutMsFromSec(3_000_000)).toBe(2_147_483_647);
+    expect(timeoutMsFromSec(Number.POSITIVE_INFINITY)).toBe(0);
+  });
+
   it("defaults workflow timeout to stepCount × step timeout", () => {
     const spec = demoSpec(4);
     expect(resolveWorkflowTimeoutSec(spec, {})).toBe(4 * DEFAULT_STEP_TIMEOUT_SEC);
