@@ -827,6 +827,8 @@
     // Whatever the banner and the ledger have not already said: retries, gates
     // that did not pass, condition-skips — and, on a clean run, the receipt.
     body.appendChild(renderNotes(report, root));
+    var saved = renderSavedOutputs(report);
+    if (saved) body.appendChild(saved);
 
     var shown = outputStep(leaves, root, report);
     body.appendChild(renderOutput(shown));
@@ -919,6 +921,31 @@
         h("div", { class: "sev", text: (c.id || "").toUpperCase() }),
         h("div", { class: "what", text: c.value })
       ));
+    });
+    return box;
+  }
+
+  /**
+   * Where the workflow's declared outputs were saved, or why one was not: the
+   * answer to "where did the report go?" A workflow that declares none gets
+   * nothing here.
+   */
+  function renderSavedOutputs(report) {
+    var outputs = report.outputs || [];
+    if (!outputs.length || !SteamtrainReducer.arrivalOutputLines) return null;
+    var lines = SteamtrainReducer.arrivalOutputLines(outputs, S.project && S.project.cwd);
+    var box = h("div", { class: "arrival-report arrival-outputs" });
+    box.appendChild(h("div", { class: "arrival-report-head" },
+      h("div", { class: "src", text: "Saved" }),
+      h("div", { class: "rule" })
+    ));
+    outputs.forEach(function (o, i) {
+      var row = h("div", { class: "finding" },
+        h("div", { class: "sev" + (o.written ? "" : " medium"), text: o.written ? "FILE" : "not saved" }),
+        h("div", { class: "what", text: lines[i] })
+      );
+      if (o.written && o.path) row.title = o.path;
+      box.appendChild(row);
     });
     return box;
   }

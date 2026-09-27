@@ -278,5 +278,14 @@ function validateRecord(file: string): RunRecord | undefined {
     budget: r.budget && typeof r.budget === "object" ? r.budget : undefined,
     harvest: r.harvest && typeof r.harvest === "object" ? r.harvest : undefined,
     interventions: Array.isArray(r.interventions) ? r.interventions : undefined,
+    outputs: Array.isArray(r.outputs)
+      ? r.outputs.filter(
+          (o) =>
+            o &&
+            typeof o === "object" &&
+            typeof o.key === "string" &&
+            typeof o.written === "boolean",
+        )
+      : undefined,
   };
 }

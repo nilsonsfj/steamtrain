@@ -44,7 +44,7 @@ import { collectArtifacts } from "./artifacts";
 import { MAX_COMMAND_OUTPUT_BYTES, runShellCommand } from "./command";
 import type { StepEditPatch, StepKillResult, WorkflowRunControl } from "./control";
 import { addSpend, addTokens, replayedSpend } from "./cost";
-import type { StepPermissionsInfo, WorkflowEvent } from "./events";
+import type { StepPermissionsInfo, WorkflowEvent, WorkflowOutputResult } from "./events";
 import type { StepRetryEvent } from "./events";
 import { mergeConflictGuidance } from "./gc";
 import { resolveSteamtrainCliInvocation } from "./github-checks";
@@ -94,6 +94,7 @@ import {
   shouldAdvanceFailover,
   shouldFailFastWithoutCandidate,
 } from "./model-failover";
+import { writeWorkflowOutputs } from "./outputs";
 import { applyWorkflowStepOverrides } from "./overrides";
 import {
   type WorkspaceFingerprint,
@@ -260,6 +261,12 @@ export interface WorkflowRunContext {
    * never set this.
    */
   workflowCallStack?: string[];
+  /**
+   * Where this run writes its declared `outputs`, by output key, overriding
+   * the spec's `path` (`--out key=path`). Relative paths resolve against
+   * `deps.cwd`.
+   */
+  outputPaths?: Record<string, string>;
 }
 
 /**
@@ -371,6 +378,7 @@ export async function* runWorkflow(
   deps: WorkflowDeps,
   signal?: AbortSignal,
 ): AsyncGenerator<WorkflowEvent> {
+  const startedAt = Date.now();
   const valid = validateWorkflow(spec, deps.loopMaxIterations);
   if (!valid.ok) throw new Error(`invalid workflow '${spec.name}': ${valid.error}`);
 
@@ -472,8 +480,39 @@ export async function* runWorkflow(
     ok: workflowOk && !signal?.aborted && !env.budgetState.exceeded,
     results: [...finalResults.values()],
     budgetExceeded: env.budgetState.exceeded,
+    outputs: await runOutputs(env, startedAt),
     ts: Date.now(),
   };
+}
+
+/**
+ * Write the workflow's declared outputs as the run ends. A sub-workflow's run
+ * writes none: its caller reads its steps. A canceled run writes none either,
+ * since a cancel may be a hand-off to a detached runner that finishes the run
+ * and writes them then.
+ */
+async function runOutputs(
+  env: RunEnv,
+  startedAt: number,
+): Promise<WorkflowOutputResult[] | undefined> {
+  const { spec, ctx, deps, signal } = env;
+  if (!spec.outputs || Object.keys(spec.outputs).length === 0) return undefined;
+  if (ctx.workflowCallStack?.length) return undefined;
+  if (signal?.aborted) {
+    return Object.entries(spec.outputs).map(([key, output]) => ({
+      key,
+      ...(output.description ? { description: output.description } : {}),
+      written: false,
+      error: "the run was canceled",
+    }));
+  }
+  return writeWorkflowOutputs(spec, {
+    cwd: deps.cwd,
+    startedAt,
+    context: { input: ctx.input, inputs: ctx.inputs, outputs: env.outputs, results: env.results },
+    results: env.results,
+    paths: ctx.outputPaths,
+  });
 }
 
 /** Sum leaf-step cost across cached results, so a resumed run counts prior spend. */

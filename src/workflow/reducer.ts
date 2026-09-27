@@ -8,7 +8,7 @@ import type { AgentEvent, AgentInstanceId, TokenUsage } from "../types/events";
 import type { ApprovalRejectDisposition } from "./approval";
 import type { StepEditPatch } from "./control";
 import { addTokens, replayedSpend } from "./cost";
-import type { StepPermissionsInfo, WorkflowEvent } from "./events";
+import type { StepPermissionsInfo, WorkflowEvent, WorkflowOutputResult } from "./events";
 import type { RunRecord } from "./history";
 import { llmStepApiId } from "./llm";
 import type { WorktreeDiff } from "./merge";
@@ -297,6 +297,8 @@ export interface WorkflowState {
   pausedBy?: string;
   /** Accepted mid-run step edits (latest patch per step id). */
   editedSteps?: Record<string, StepEditPatch>;
+  /** The workflow's declared outputs once the run ends: where each was written, or why not. */
+  outputs?: WorkflowOutputResult[];
 }
 
 export const initialWorkflowState: WorkflowState = {
@@ -412,6 +414,7 @@ export function workflowStateFromRecord(record: RunRecord): WorkflowState {
     done: record.phases.every((phase) => phase.done),
     ok: record.ok,
     loopMarkers: [],
+    outputs: record.outputs,
   };
 }
 
@@ -687,7 +690,14 @@ export function workflowReducer(state: WorkflowState, action: WorkflowStateActio
         },
       };
     case "workflow_done":
-      return { ...state, done: true, ok: e.ok, results: e.results, paused: false };
+      return {
+        ...state,
+        done: true,
+        ok: e.ok,
+        results: e.results,
+        paused: false,
+        outputs: e.outputs,
+      };
     case "run_paused":
       return { ...state, paused: true, pausedBy: e.by };
     case "run_resumed":

@@ -252,6 +252,29 @@ function extractRefs(text: string | undefined): string[] {
   return refs;
 }
 
+/**
+ * The step a `steps.…` reference reads, tried in the same order
+ * {@link resolveTemplateValue} resolves them (the order is load-bearing: see
+ * `STEP_FIELD`), or undefined when the reference names no step.
+ */
+function referencedStepId(ref: string): string | undefined {
+  for (const pattern of [STEP_WORKTREE_FIELD, STEP_ARTIFACT_FIELD, STEP_JSON_FIELD, STEP_FIELD]) {
+    const match = pattern.exec(ref);
+    if (match) return match[1] as string;
+  }
+  return undefined;
+}
+
+/** Ids of the steps a template reads, in order of first use. */
+export function templateStepIds(text: string): string[] {
+  const ids = new Set<string>();
+  for (const ref of extractRefs(text)) {
+    const id = referencedStepId(ref);
+    if (id !== undefined) ids.add(id);
+  }
+  return [...ids];
+}
+
 /** Scan condition text fields for template refs. `condition.step` is intentionally skipped — it's a plain step id, not a template string. */
 function scanConditionRefs(condition: GateCondition | undefined, refs: string[]): void {
   if (!condition) return;
@@ -488,6 +511,26 @@ export function lintTemplateRefs(spec: WorkflowSpec): string[] {
           } else {
             warnings.push(`step '${step.id}' uses invalid template reference '{{${ref}}}'`);
           }
+        }
+      }
+    }
+  }
+
+  // Outputs render once, after every step, so they have no item or loop pass.
+  for (const [name, output] of Object.entries(spec.outputs ?? {})) {
+    for (const ref of extractRefs(output.value)) {
+      if (ref.startsWith("inputs.")) {
+        if (!inputKeys.has(ref.slice(7))) {
+          warnings.push(`output '${name}' references undeclared input '${ref.slice(7)}'`);
+        }
+      } else if (ref === "item" || ref.startsWith("item.") || ref === "iteration") {
+        warnings.push(`output '${name}' uses '{{${ref}}}', which has no value once the run ends`);
+      } else if (ref.startsWith("steps.")) {
+        const id = referencedStepId(ref);
+        if (id === undefined) {
+          warnings.push(`output '${name}' uses invalid template reference '{{${ref}}}'`);
+        } else if (!stepIds.has(id)) {
+          warnings.push(`output '${name}' references unknown step '${id}'`);
         }
       }
     }

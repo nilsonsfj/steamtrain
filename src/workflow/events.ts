@@ -211,7 +211,27 @@ export interface WorkflowDoneEvent {
    * and re-run, and completed steps replay from cache. `ok` is false when set.
    */
   budgetExceeded?: boolean;
+  /**
+   * The workflow's declared `outputs` and what became of each: written to a
+   * file, or why not. Omitted when the workflow declares none, and for a
+   * sub-workflow's own run (only the run a person started writes files).
+   */
+  outputs?: WorkflowOutputResult[];
   ts: number;
+}
+
+/** What became of one declared workflow output when the run ended. */
+export interface WorkflowOutputResult {
+  /** The output's name in the spec's `outputs`. */
+  key: string;
+  description?: string;
+  /** Absolute path of the file: where it was written, or would have been. */
+  path?: string;
+  written: boolean;
+  /** Size of the written file. */
+  bytes?: number;
+  /** Why it was not written, e.g. `step 'report' failed`. */
+  error?: string;
 }
 
 /**

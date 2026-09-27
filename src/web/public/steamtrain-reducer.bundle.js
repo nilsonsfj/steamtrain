@@ -31,6 +31,7 @@ var SteamtrainReducer = (() => {
     applyWorkflowSessionOverrides: () => applyWorkflowSessionOverrides,
     applyWorkflowStepOverrides: () => applyWorkflowStepOverrides,
     approvalDeepLink: () => approvalDeepLink,
+    arrivalOutputLines: () => arrivalOutputLines,
     arrivalReceiptCards: () => arrivalReceiptCards,
     arrivalRootCause: () => arrivalRootCause,
     buildArrivalReport: () => buildArrivalReport,
@@ -457,7 +458,14 @@ var SteamtrainReducer = (() => {
           }
         };
       case "workflow_done":
-        return { ...state, done: true, ok: e.ok, results: e.results, paused: false };
+        return {
+          ...state,
+          done: true,
+          ok: e.ok,
+          results: e.results,
+          paused: false,
+          outputs: e.outputs
+        };
       case "run_paused":
         return { ...state, paused: true, pausedBy: e.by };
       case "run_resumed":
@@ -869,6 +877,7 @@ var SteamtrainReducer = (() => {
         agentless
       },
       notices: arrivalNotices(flat.map((f) => f.step)),
+      outputs: state.outputs ?? [],
       destinations
     };
   }
@@ -1031,6 +1040,15 @@ var SteamtrainReducer = (() => {
       { id: "cost", label: "What it cost", value: cost },
       { id: "produced", label: "What it produced", value: produced }
     ];
+  }
+  function arrivalOutputLines(outputs, cwd) {
+    const root = cwd?.replace(/[\\/]+$/, "");
+    return outputs.map((output) => {
+      if (!output.written) return `not saved ${output.key}: ${output.error ?? "unknown reason"}`;
+      const path = output.path ?? "";
+      const shown = root && (path.startsWith(`${root}/`) || path.startsWith(`${root}\\`)) ? path.slice(root.length + 1) : path;
+      return `saved ${output.key} \u2192 ${shown}`;
+    });
   }
   function formatArrivalReceipt(receipt) {
     const parts = [];

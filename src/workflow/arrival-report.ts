@@ -1,4 +1,5 @@
 import { replayedSpend, totalTokens } from "./cost";
+import type { WorkflowOutputResult } from "./events";
 import type { StepState, WorkflowState } from "./reducer";
 import { flattenSteps } from "./reducer";
 
@@ -121,6 +122,8 @@ export interface ArrivalReport {
   receipt: ArrivalReceipt;
   /** What went wrong (or nearly did), worst first. Empty on a clean run. */
   notices: ArrivalNotice[];
+  /** The workflow's declared outputs: the file each was saved to, or why not. */
+  outputs: WorkflowOutputResult[];
   destinations: ArrivalDestination[];
 }
 
@@ -246,6 +249,7 @@ export function buildArrivalReport(
       agentless,
     },
     notices: arrivalNotices(flat.map((f) => f.step)),
+    outputs: state.outputs ?? [],
     destinations,
   };
 }
@@ -503,6 +507,27 @@ export function arrivalReceiptCards(receipt: ArrivalReceipt): Array<{
 }
 
 /** One-line receipt for compact UI chrome. */
+/**
+ * One line per declared output: where it was saved, or why it was not. A path
+ * inside `cwd` is shown relative to it. Plain string work, no `node:path`, so
+ * the browser bundle can use it too.
+ */
+export function arrivalOutputLines(
+  outputs: readonly WorkflowOutputResult[],
+  cwd?: string,
+): string[] {
+  const root = cwd?.replace(/[\\/]+$/, "");
+  return outputs.map((output) => {
+    if (!output.written) return `not saved ${output.key}: ${output.error ?? "unknown reason"}`;
+    const path = output.path ?? "";
+    const shown =
+      root && (path.startsWith(`${root}/`) || path.startsWith(`${root}\\`))
+        ? path.slice(root.length + 1)
+        : path;
+    return `saved ${output.key} → ${shown}`;
+  });
+}
+
 export function formatArrivalReceipt(receipt: ArrivalReceipt): string {
   const parts: string[] = [];
   parts.push(`${(receipt.durationMs / 1000).toFixed(1)}s`);

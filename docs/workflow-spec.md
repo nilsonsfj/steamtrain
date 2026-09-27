@@ -18,21 +18,22 @@ Companion docs (optional, not required to author):
 4. [Step kind cheat sheet](#step-kind-cheat-sheet)
 5. [Top-level workflow fields](#top-level-workflow-fields)
 6. [Workflow inputs](#workflow-inputs)
-7. [Phase fields](#phase-fields)
-8. [Shared step fields](#shared-step-fields)
-9. [Building blocks](#building-blocks) (every step kind)
-10. [Loops](#loops-loopto)
-11. [Workspace inheritance and artifacts](#workspace-inheritance-and-artifacts-file-handoff)
-12. [Session continuity](#session-continuity-session)
-13. [Tool permissions](#tool-permissions-permissions)
-14. [Per-step conditions](#per-step-conditions-when)
-15. [Structured step outputs](#structured-step-outputs-output)
-16. [Scheduling](#scheduling)
-17. [Timeouts](#timeouts)
-18. [Auto-retry](#auto-retry-on-transient-failures)
-19. [Templates](#templates)
-20. [Validation rules](#validation-rules)
-21. [CLI](#cli)
+7. [Workflow outputs](#workflow-outputs)
+8. [Phase fields](#phase-fields)
+9. [Shared step fields](#shared-step-fields)
+10. [Building blocks](#building-blocks) (every step kind)
+11. [Loops](#loops-loopto)
+12. [Workspace inheritance and artifacts](#workspace-inheritance-and-artifacts-file-handoff)
+13. [Session continuity](#session-continuity-session)
+14. [Tool permissions](#tool-permissions-permissions)
+15. [Per-step conditions](#per-step-conditions-when)
+16. [Structured step outputs](#structured-step-outputs-output)
+17. [Scheduling](#scheduling)
+18. [Timeouts](#timeouts)
+19. [Auto-retry](#auto-retry-on-transient-failures)
+20. [Templates](#templates)
+21. [Validation rules](#validation-rules)
+22. [CLI](#cli)
 
 ## Mental model
 
@@ -158,6 +159,7 @@ steamtrain workflow run my-workflow --input "small test"
 | `name` | no in `steamtrain.json` | Launch name. The map key is injected as `name`. |
 | `description` | no | Human-readable picker/list text. |
 | `inputs` | no | Named typed parameters (`{{inputs.<key>}}`). See [Workflow inputs](#workflow-inputs). |
+| `outputs` | no | Named results written to files when the run ends. See [Workflow outputs](#workflow-outputs). |
 | `phases` | yes | Ordered list of workflow phases. |
 | `retry` | no | Default auto-retry policy for every agent worker/processor step. See [Auto-retry](#auto-retry-on-transient-failures). |
 | `modelFailover` | no | Default mid-flight model failover policy (quota / rate-limit re-routing). See [Model binding](./model-binding.md#configuring-mid-flight-model-failover). |
@@ -227,6 +229,52 @@ Failover precedence for a step: **input `fallbackModels`** (from referenced
 model params) → **step `fallbackModels`** → **workflow `fallbackModels`**.
 See [Model binding](./model-binding.md#configuring-mid-flight-model-failover)
 for the mid-flight policy knobs (`modelFailover`).
+
+## Workflow outputs
+
+Outputs are the other side of inputs: what a run leaves behind. Declare them
+under `outputs`. When the run ends, the engine renders each `value` and writes
+it to a file. The run history records where each one went, and the CLI, TUI
+and web UI show the path when the run ends.
+
+| field | required | meaning |
+| --- | --- | --- |
+| `value` | yes | Template rendered when the run ends, usually one step's output: `"{{steps.report.output}}"`. Same placeholders as a prompt, except `{{item}}` and `{{iteration}}`. |
+| `description` | no | Help text shown in UIs. |
+| `path` | no | Where the file goes, relative to the directory the run started in. May use `{{workflow}}`, `{{run.timestamp}}` (the run's local start time, `2026-09-27_10-47-12`) and declared `{{inputs.<key>}}`. Default: `.steamtrain/outputs/<workflow>/<run.timestamp>/<key>.md`. |
+
+```jsonc
+{
+  "permissions": "read-only",
+  "outputs": {
+    "report": {
+      "description": "The prioritized report",
+      "value": "{{steps.report.output}}"
+    },
+    "latest": {
+      "value": "# {{input}}\n\n{{steps.report.output}}",
+      "path": "reports/{{workflow}}-latest.md"
+    }
+  },
+  "phases": [ … ]
+}
+```
+
+- **When it is written.** An output is written only when every step its
+  `value` reads finished ok. Otherwise it is recorded as not saved, with the
+  step that stopped it (`step 'report' failed`). A canceled run writes none
+  (it may be resuming elsewhere), and a sub-workflow's run writes none: only
+  the run a person started does.
+- **Read-only runs still save.** The engine writes the file after the steps
+  are done, so a `read-only` workflow (bug-hunt, code-review) keeps its report
+  without any step getting write access.
+- **Where it may go.** A spec's `path` must stay inside the directory the run
+  started in, and out of `.git`: it is checked before and after following
+  symlinks, and an input value fills one path segment at most. Two runs that
+  start in the same second get separate default directories.
+- **Per run.** `--out <key>=<path>` sends one output elsewhere for one CLI run.
+  That path is yours, so it may be anywhere; a relative one resolves against
+  the directory the run starts in.
 
 ## Phase fields
 
@@ -1826,6 +1874,7 @@ steamtrain workflow validate [name]
 steamtrain workflow run <name> --input "task text"
 steamtrain workflow run <name> --stdin --json
 steamtrain workflow run <name> --input "task" --human <stepId>=<value|@file>
+steamtrain workflow run <name> --input "task" --out <output>=<path>
 steamtrain workflow answer <runId> [--step <stepId>] [--value <text> | --file <path>]
 steamtrain workflow takeover <runId> <stepId>
 ```
