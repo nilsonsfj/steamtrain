@@ -1913,6 +1913,7 @@ export function App({
             narration={runner.narration}
             showArrival={runner.showArrival}
             credentialFree={softHealth}
+            cwd={cwd}
           />
         ) : picker.wfPreview && !picker.preview.spec ? (
           <Box justifyContent="center" alignItems="center" height={streamHeight}>
@@ -2192,6 +2193,7 @@ function HistoryPanel({
           width={width}
           selectedIndex={clamped}
           elapsedMs={elapsed}
+          cwd={history.record?.cwd || undefined}
         />
       </Box>
     );

@@ -24,6 +24,8 @@ import {
   loadScripts,
 } from "./helpers/stub-dom";
 
+import { arrivalOutputLines } from "../src/workflow/arrival-report";
+
 const PUBLIC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "src", "web", "public");
 const runsJs = readFileSync(join(PUBLIC_DIR, "st-runs.js"), "utf8");
 const runsCss = readFileSync(join(PUBLIC_DIR, "runs.css"), "utf8");
@@ -206,6 +208,7 @@ async function mountRuns(opts: {
     Steamtrain: ST,
     SteamtrainReducer: {
       runsDeepLink: (id?: string) => (id ? `#runs/${id}` : "#runs"),
+      arrivalOutputLines,
     },
     location,
     setInterval: () => 0,
@@ -698,6 +701,29 @@ describe("runs page: the full receipt", () => {
 
     await page.clickStep("scan-logic");
     expect(page.main()).not.toContain("FOUND-A-BUG-IN-THE-TEARDOWN");
+  });
+
+  it("says where the run's outputs were saved, and why one was not", async () => {
+    const page = await openFullReceipt({
+      detail: {
+        ...DETAIL,
+        cwd: "/work/app",
+        outputs: [
+          {
+            key: "report",
+            written: true,
+            path: "/work/app/.steamtrain/outputs/bug-hunt/2026-09-27_10-47-12/report.md",
+          },
+          { key: "log", written: false, error: "step 'check' failed" },
+        ],
+      },
+    });
+    const main = page.main();
+    expect(main).toContain("Outputs");
+    expect(main).toContain(
+      "saved report → .steamtrain/outputs/bug-hunt/2026-09-27_10-47-12/report.md",
+    );
+    expect(main).toContain("not saved log: step 'check' failed");
   });
 
   it("tags the states that explain a cheap or odd step", async () => {

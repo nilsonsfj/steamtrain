@@ -11,7 +11,6 @@ import {
   type WorkflowSpec,
   createLiveRunStore,
   lintTemplateRefs,
-  runTimestamp,
   runWorkflow,
   validateWorkflow,
   workflowReducer,
@@ -373,7 +372,7 @@ describe("workflow outputs: the CLI", () => {
     const history = await runCliText(["workflow", "history"]);
     const id = /\b([0-9a-f-]{36})\b/.exec(history)?.[1] ?? "";
     const shown = await runCliText(["workflow", "history", "show", id]);
-    expect(shown).toContain(`output:   report → ${join(dir, saved)}`);
+    expect(shown).toContain(`output:   saved report → ${saved}`);
   });
 
   it("writes an output where --out sends it", async () => {
@@ -388,7 +387,7 @@ describe("workflow outputs: the CLI", () => {
     const history = await runCliText(["workflow", "history"]);
     const id = /\b([0-9a-f-]{36})\b/.exec(history)?.[1] ?? "";
     const shown = await runCliText(["workflow", "history", "show", id]);
-    expect(shown).toContain(`output:   report → ${join(dir, "notes/bugs.md")}`);
+    expect(shown).toContain("output:   saved report → notes/bugs.md");
   });
 
   it("hands --out to a detached run through its launch", async () => {

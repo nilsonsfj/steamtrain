@@ -1,7 +1,13 @@
 import { render } from "ink-testing-library";
 import { describe, expect, it } from "vitest";
 import { ArrivalReportView } from "../src/tui/ArrivalReport";
-import type { ArrivalReport } from "../src/workflow";
+import { WorkflowView } from "../src/tui/WorkflowView";
+import {
+  type ArrivalReport,
+  type WorkflowEvent,
+  workflowReducer,
+  workflowStateFromSpec,
+} from "../src/workflow";
 
 function report(ok = true, outputs: ArrivalReport["outputs"] = []): ArrivalReport {
   return {
@@ -71,5 +77,55 @@ describe("ArrivalReportView", () => {
     const frame = lastFrame() ?? "";
     expect(frame).toContain("saved report → .steamtrain/outputs/bug-hunt/r/report.md");
     expect(frame).toContain("not saved log: step 'check' failed");
+  });
+});
+
+describe("ArrivalReportView: many outputs", () => {
+  it("keeps the destinations on screen, folding the outputs that do not fit", () => {
+    const outputs = Array.from({ length: 12 }, (_, i) => ({
+      key: `out${i}`,
+      written: true,
+      path: `/work/app/out${i}.md`,
+    }));
+    const { lastFrame } = render(
+      <ArrivalReportView report={report(true, outputs)} width={80} height={14} cwd="/work/app" />,
+    );
+    const frame = lastFrame() ?? "";
+    // 14 rows leave room for 7 output lines: six outputs and a count of the rest.
+    expect(frame).toContain("saved out5 → out5.md");
+    expect(frame).not.toContain("out6.md");
+    expect(frame).toContain("… 6 more (workflow history show)");
+    expect(frame).toContain("Ride again");
+  });
+});
+
+describe("WorkflowView: the run's directory", () => {
+  it("shows saved paths relative to the directory the run ran in", () => {
+    let state = workflowStateFromSpec({
+      name: "hunt",
+      phases: [{ id: "p", title: "P", steps: [{ id: "s", kind: "command", cmd: "true" }] }],
+    });
+    const events: WorkflowEvent[] = [
+      { kind: "workflow_start", name: "hunt", phaseCount: 1, stepCount: 1, ts: 1 },
+      {
+        kind: "workflow_done",
+        ok: true,
+        results: [],
+        outputs: [{ key: "report", written: true, path: "/work/repo/.steamtrain/outputs/r.md" }],
+        ts: 2,
+      },
+    ];
+    for (const event of events) state = workflowReducer(state, { type: "event", event });
+    const { lastFrame } = render(
+      <WorkflowView
+        state={state}
+        width={80}
+        height={20}
+        selectedIndex={0}
+        elapsedMs={1}
+        cwd="/work/repo"
+      />,
+    );
+    expect(lastFrame() ?? "").toContain("saved report → .steamtrain/outputs/r.md");
   });
 });
