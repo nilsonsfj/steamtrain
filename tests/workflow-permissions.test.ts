@@ -294,7 +294,10 @@ describe("read-only workspace verification", () => {
   it("passes in a repo with ignored dependencies and build output", async () => {
     const root = await tempDir();
     const repo = join(root, "repo");
-    await initRepo(repo, { ".gitignore": "node_modules/\ndist/\n" });
+    // `.claude` has no slash, so git ignores the link itself as well.
+    await initRepo(repo, { ".gitignore": "node_modules/\ndist/\n.claude\n" });
+    await mkdir(join(repo, ".claude"), { recursive: true });
+    await writeFile(join(repo, ".claude", "settings.json"), "{}\n");
     // The worktree gets these as symlinks back into the checkout. A directory
     // pattern like `node_modules/` does not match a symlink, so they show up
     // as untracked links that lead out of the workspace.
@@ -378,6 +381,14 @@ describe("read-only workspace verification", () => {
       expected: () => ["T node_modules"],
     },
     {
+      name: "replaces a linked dependency with a file",
+      change: async (link: string) => {
+        await rm(link);
+        await writeFile(link, "not a link\n");
+      },
+      expected: () => ["T node_modules"],
+    },
+    {
       name: "creates its own link out of the workspace",
       change: (link: string, elsewhere: string) =>
         symlink(elsewhere, join(dirname(link), "escape")),
@@ -417,6 +428,32 @@ describe("read-only workspace verification", () => {
     const result = doneResult(events, "review");
     expect(result?.ok).toBe(false);
     expect(result?.permissions?.violations).toEqual(expected(elsewhere));
+    // The fingerprint stayed available alongside the link check.
+    expect(result?.permissions?.verified).toBe(true);
+  });
+
+  it("still sees an edit when git ignores a linked path by name", async () => {
+    const root = await tempDir();
+    const repo = join(root, "repo");
+    // Naming an ignored path in `git add`, even to exclude it, fails the add.
+    await initRepo(repo, { ".gitignore": ".claude\n" });
+    await mkdir(join(repo, ".claude"), { recursive: true });
+    await writeFile(join(repo, ".claude", "settings.json"), "{}\n");
+
+    const events = await collect(reviewSpec("read-only", "claude"), {
+      createAdapter: fakeAdapter([], { writes: "sneaky.txt" }),
+      maxConcurrency: 1,
+      cwd: repo,
+      agentWorkspace: createGitWorktreeManager({
+        baseDir: join(root, "worktrees"),
+        runId: "run-perm-named",
+      }),
+    });
+
+    const result = doneResult(events, "review");
+    expect(result?.ok).toBe(false);
+    expect(result?.permissions?.violations).toEqual(["A sneaky.txt"]);
+    expect(result?.permissions?.verified).toBe(true);
   });
 
   it("still refuses a committed symlink that leads out of the repository", async () => {
