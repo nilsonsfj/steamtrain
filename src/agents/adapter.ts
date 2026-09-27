@@ -205,12 +205,13 @@ export async function* runAgentProcess(params: AgentProcessParams): AsyncGenerat
         };
         return;
       }
-      if ((item.code ?? 0) !== 0) {
+      if (item.code === null || item.signal || (item.code ?? 0) !== 0) {
+        const how = item.signal ? `killed by ${item.signal}` : `exited with code ${item.code}`;
         yield {
           kind: "error",
           agent: id,
           ts,
-          message: `'${binary}' exited with code ${item.code}${stderrTail}`,
+          message: `'${binary}' ${how}${stderrTail}`,
           stderr: stderr || undefined,
           code: item.code,
         };
