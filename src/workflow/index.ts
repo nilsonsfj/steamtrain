@@ -128,6 +128,7 @@ export {
   findOutboundSymlinks,
   fingerprintChanges,
   fingerprintWorkspace,
+  linkedTargets,
 } from "./permission-guard";
 export {
   type WorkflowAutonomy,
