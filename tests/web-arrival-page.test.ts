@@ -100,6 +100,8 @@ function mount(opts: {
   spec?: unknown;
   /** Answers for GET /api/history/:id/worktrees, in order; the last repeats. */
   worktrees?: WorktreeAnswer[];
+  /** The project the page is open on; saved paths are shown relative to its directory. */
+  project?: { cwd: string };
 }): Mounted {
   const S: Record<string, unknown> = {
     runState: opts.state,
@@ -113,6 +115,7 @@ function mount(opts: {
     arrivalMenuOpen: false,
     arrivalWorktrees: null,
     arrivalWorktreesWait: null,
+    project: opts.project ?? null,
   };
   const calls: Mounted["calls"] = {
     rerunHistory: [],
@@ -665,3 +668,41 @@ function specWith(stepId: string, cmd: string) {
     phases: [{ id: "p", title: "p", steps: [{ id: stepId, kind: "command", cmd }] }],
   };
 }
+
+// ── saved outputs ────────────────────────────────────────────────────────────
+
+describe("finished-run page: saved outputs", () => {
+  it("says where each declared output was saved, and why one was not", () => {
+    const state = runState([
+      start(1),
+      ...phase("build", 0),
+      ...step("build", "build", { ok: true }),
+      {
+        kind: "workflow_done",
+        ok: true,
+        results: [],
+        outputs: [
+          {
+            key: "report",
+            written: true,
+            path: "/work/app/.steamtrain/outputs/ship-it/2026-09-27_10-47-12/report.md",
+          },
+          { key: "log", written: false, error: "step 'check' failed" },
+        ],
+        ts: at(),
+      },
+    ]);
+    const page = mount({ state, runStatus: "done", project: { cwd: "/work/app" } });
+    const saved = byClass(page.page(), "arrival-outputs")[0];
+    expect(saved && shownText(saved)).toContain("Saved");
+    expect(saved && shownText(saved)).toContain(
+      "saved report → .steamtrain/outputs/ship-it/2026-09-27_10-47-12/report.md",
+    );
+    expect(saved && shownText(saved)).toContain("not saved log: step 'check' failed");
+  });
+
+  it("shows no Saved box for a workflow that declares no outputs", () => {
+    const page = mount({ state: cleanRun(), runStatus: "done" });
+    expect(byClass(page.page(), "arrival-outputs")).toHaveLength(0);
+  });
+});

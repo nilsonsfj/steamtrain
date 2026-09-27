@@ -1311,8 +1311,8 @@
     }
     // Where the workflow's declared outputs were saved: what a reader of a
     // finished run most often came back for.
-    if (record.outputs && record.outputs.length && SteamtrainReducer.arrivalOutputLines) {
-      var outputLines = SteamtrainReducer.arrivalOutputLines(record.outputs, record.cwd);
+    if (record.outputs && record.outputs.length && window.SteamtrainReducer && window.SteamtrainReducer.arrivalOutputLines) {
+      var outputLines = window.SteamtrainReducer.arrivalOutputLines(record.outputs, record.cwd);
       var outputsBody = h("div", { class: "hist-input-body hist-outputs" });
       record.outputs.forEach(function (o, i) {
         outputsBody.appendChild(h("div", {

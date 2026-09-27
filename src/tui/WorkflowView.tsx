@@ -68,6 +68,8 @@ interface WorkflowViewProps {
   showArrival?: boolean;
   /** True when this run needed no agent CLI and no LLM API key. */
   credentialFree?: boolean;
+  /** The directory the run ran in; saved output paths are shown relative to it. */
+  cwd?: string;
 }
 
 const STEP_GLYPH: Record<
@@ -106,6 +108,7 @@ export function WorkflowView({
   narration = [],
   showArrival = true,
   credentialFree = false,
+  cwd,
 }: WorkflowViewProps) {
   const innerWidth = Math.max(20, width - 4);
   const flat = useMemo(() => flattenSteps(state), [state]);
@@ -245,7 +248,13 @@ export function WorkflowView({
 
   if (preferArrival && arrival) {
     return (
-      <ArrivalReportView report={arrival} width={width} height={height} workflowName={state.name} />
+      <ArrivalReportView
+        report={arrival}
+        width={width}
+        height={height}
+        workflowName={state.name}
+        cwd={cwd}
+      />
     );
   }
 

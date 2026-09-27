@@ -45,6 +45,7 @@ import {
   type WorktreeSource,
   aggregateCosts,
   applyWorkflowStepOverrides,
+  arrivalOutputLines,
   autonomyBadge,
   autonomyDescription,
   createWorkflowCacheStore,
@@ -1367,12 +1368,8 @@ function printHistoryRecord(
     }
     if (bits.length > 0) out(`  harvest:  ${bits.join(" · ")}\n`);
   }
-  for (const output of record.outputs ?? []) {
-    out(
-      output.written
-        ? `  output:   ${output.key} → ${output.path}\n`
-        : `  output:   ${output.key} not saved: ${output.error ?? "unknown reason"}\n`,
-    );
+  for (const line of arrivalOutputLines(record.outputs ?? [], record.cwd)) {
+    out(`  output:   ${line}\n`);
   }
   out(`  totals:   ${formatRunTotals(record.totals, { cached: true, tokens: true })}\n`);
   printModelBreakdown(modelBreakdownForRecord(record), out);
