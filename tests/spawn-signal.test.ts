@@ -104,6 +104,21 @@ describe("runProcessLines signal handling", () => {
     expect(exit.signal).toBeNull();
   });
 
+  it("does not crash when the child closes stdin before the prompt is written", async () => {
+    // A process that never reads stdin and exits immediately closes the pipe;
+    // write() then emits EPIPE. Without an error listener that takes down the
+    // whole process as an unhandled 'error' event.
+    const gen = runProcessLines({
+      binary: "node",
+      args: ["-e", "process.exit(0)"],
+      prompt: "x".repeat(256 * 1024),
+    });
+    const lines = await drain(gen);
+    const exit = lines.find((l) => l.kind === "exit") as Extract<ProcessLine, { kind: "exit" }>;
+    expect(exit).toBeDefined();
+    expect(exit.code === 0 || exit.code === null).toBe(true);
+  });
+
   it("reports stdout from the child before it exits", async () => {
     const gen = runProcessLines({
       binary: "node",

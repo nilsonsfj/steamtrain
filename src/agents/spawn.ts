@@ -88,9 +88,9 @@ export async function* runProcessLines(opts: ProcessRunOptions): AsyncGenerator<
       resolveNext = resolve;
     });
 
+  const useStdin = typeof opts.prompt === "string";
   let child: PipedChild | PipedChildWithStdin;
   try {
-    const useStdin = typeof opts.prompt === "string";
     child = spawn(opts.binary, opts.args, {
       stdio: [useStdin ? "pipe" : "ignore", "pipe", "pipe"],
       env: childEnv(opts.env),
@@ -99,10 +99,6 @@ export async function* runProcessLines(opts: ProcessRunOptions): AsyncGenerator<
       // CLI forks (same pattern as command steps and doctor --version probes).
       detached: process.platform !== "win32",
     }) as PipedChild | PipedChildWithStdin;
-    if (useStdin && child.stdin) {
-      child.stdin.write(opts.prompt);
-      child.stdin.end();
-    }
   } catch (err) {
     // Synchronous spawn failure (rare; usually surfaces via the 'error' event).
     yield {
@@ -129,6 +125,23 @@ export async function* runProcessLines(opts: ProcessRunOptions): AsyncGenerator<
 
   child.stdout.setEncoding("utf8");
   child.stderr.setEncoding("utf8");
+
+  if (useStdin && child.stdin) {
+    // Attach before write: a closed pipe emits 'error' (EPIPE) rather than
+    // throwing, and an unhandled stdin error takes down the whole process.
+    child.stdin.on("error", (err) => {
+      if (isPipeClosedError(err)) return;
+      spawnError = errorMessage(err);
+    });
+    try {
+      child.stdin.write(opts.prompt);
+      child.stdin.end();
+    } catch (err) {
+      if (!isPipeClosedError(err)) {
+        spawnError = errorMessage(err);
+      }
+    }
+  }
 
   const noteActivity = (): void => {
     resetIdleTimer();
@@ -351,4 +364,10 @@ function killTree(child: PipedChild | PipedChildWithStdin, sig: NodeJS.Signals):
 function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   return String(err);
+}
+
+function isPipeClosedError(err: unknown): boolean {
+  const code =
+    err && typeof err === "object" && "code" in err ? (err as { code?: string }).code : undefined;
+  return code === "EPIPE" || code === "ERR_STREAM_DESTROYED";
 }
