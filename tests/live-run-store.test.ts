@@ -75,6 +75,16 @@ describe("live-run store", () => {
     expect(listed.map((r) => r.id)).toEqual(["b", "a"]);
   });
 
+  it("ignores stray files in the runs directory so they cannot block the queue", async () => {
+    const root = tempDir();
+    const store = createLiveRunStore(root);
+    await store.create(meta("good"));
+    await writeFile(join(root, ".DS_Store"), "junk", "utf8");
+    const listed = await store.list({ sweep: false });
+    expect(listed.map((r) => r.id)).toEqual(["good"]);
+    expect(await acquireRunSlot(store, "good", 1, { pollMs: 5 })).toEqual({ ok: true });
+  });
+
   it("ignores corrupt and wrong-version meta files", async () => {
     const root = tempDir();
     const store = createLiveRunStore(root);

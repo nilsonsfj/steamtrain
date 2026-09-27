@@ -64,8 +64,17 @@ export function isSteamtrainStatePath(rel: string): boolean {
 
 /** True when an error is a "file/dir does not exist" (ENOENT) failure. */
 export function isEnoent(err: unknown): boolean {
+  return isErrno(err, "ENOENT");
+}
+
+/** True when a path component is a file where a directory was expected. */
+export function isEnotdir(err: unknown): boolean {
+  return isErrno(err, "ENOTDIR");
+}
+
+function isErrno(err: unknown, code: string): boolean {
   return Boolean(
-    err && typeof err === "object" && "code" in err && (err as { code?: string }).code === "ENOENT",
+    err && typeof err === "object" && "code" in err && (err as { code?: string }).code === code,
   );
 }
 

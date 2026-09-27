@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { ApprovalDecision } from "./approval";
 import type { StepEditPatch, StepEditResult } from "./control";
 import type { WorkflowEvent } from "./events";
-import { atomicWriteFile, isEnoent, sanitizePathComponent } from "./fs-util";
+import { atomicWriteFile, isEnoent, isEnotdir, sanitizePathComponent } from "./fs-util";
 import { RunRecordBuilder, type RunRecordStatus } from "./history";
 import type { WorkflowHistoryStore } from "./history-store";
 import type { HumanInputOrigin, HumanInputResponse } from "./human-input";
@@ -458,18 +458,27 @@ export function createLiveRunStore(
       if (isEnoent(err)) return [];
       throw err;
     }
+    const dirEntries: string[] = [];
+    for (const name of entries) {
+      const entryPath = join(rootDir, name);
+      const isDir = await stat(entryPath).then(
+        (info) => info.isDirectory(),
+        (err) => (isEnoent(err) || isEnotdir(err) ? false : Promise.reject(err)),
+      );
+      if (isDir) dirEntries.push(name);
+    }
     const reads = await Promise.all(
-      entries.map((name) => readMeta(join(rootDir, name, "meta.json"))),
+      dirEntries.map((name) => readMeta(join(rootDir, name, "meta.json"))),
     );
     const metas: LiveRunMeta[] = [];
-    for (let i = 0; i < entries.length; i++) {
+    for (let i = 0; i < dirEntries.length; i++) {
       const meta = reads[i];
       if (!meta) {
         // A dir with no readable meta (crash between mkdir and the meta write,
         // or stray debris) is invisible to every consumer; clear it out once
         // it is old enough to rule out an in-progress create.
         if (sweep) {
-          const dir = join(rootDir, entries[i]!);
+          const dir = join(rootDir, dirEntries[i]!);
           // ENOENT ⇒ the dir vanished concurrently (nothing to do). Any other
           // stat failure ⇒ treat as expired and still attempt the delete —
           // otherwise a permissions-broken debris dir would persist forever.
@@ -484,7 +493,7 @@ export function createLiveRunStore(
       if (sweep && isTerminalLiveRunStatus(meta.status)) {
         const endedAt = meta.endedAt ?? meta.createdAt;
         if (now() - endedAt > ttlMs) {
-          const removed = await rm(join(rootDir, entries[i]!), {
+          const removed = await rm(join(rootDir, dirEntries[i]!), {
             recursive: true,
             force: true,
           }).then(
@@ -855,7 +864,7 @@ async function readMeta(path: string): Promise<LiveRunMeta | undefined> {
   try {
     file = await readFile(path, "utf8");
   } catch (err) {
-    if (isEnoent(err)) return undefined;
+    if (isEnoent(err) || isEnotdir(err)) return undefined;
     throw err;
   }
   let parsed: unknown;
