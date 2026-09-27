@@ -131,22 +131,28 @@ async function tryAcquire(lockPath: string, nowMs: number): Promise<boolean> {
 }
 
 async function stealIfStale(lockPath: string, staleMs: number, nowMs: number): Promise<boolean> {
-  let info: { mtimeMs: number } | undefined;
+  let info: { mtimeMs: number; ino: number } | undefined;
   try {
     const s = await stat(lockPath);
-    info = { mtimeMs: s.mtimeMs };
+    info = { mtimeMs: s.mtimeMs, ino: s.ino };
   } catch (err) {
     return isEnoent(err);
   }
 
   const holder = await readHolder(lockPath);
-  if (holder && holder.host === hostname() && !isProcessAlive(holder.pid)) {
-    return removeQuietly(lockPath);
+  const deadSameHost = Boolean(holder && holder.host === hostname() && !isProcessAlive(holder.pid));
+  const staleMtime = nowMs - info.mtimeMs > staleMs;
+  if (!deadSameHost && !staleMtime) return false;
+
+  // Re-stat: another process may have replaced the lock since we first looked.
+  // Only delete if it is still the same inode and mtime we decided was stale.
+  try {
+    const again = await stat(lockPath);
+    if (again.ino !== info.ino || again.mtimeMs !== info.mtimeMs) return false;
+  } catch (err) {
+    return isEnoent(err);
   }
-  if (nowMs - info.mtimeMs > staleMs) {
-    return removeQuietly(lockPath);
-  }
-  return false;
+  return removeQuietly(lockPath);
 }
 
 async function releaseIfOwned(lockPath: string): Promise<void> {

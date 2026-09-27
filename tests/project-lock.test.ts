@@ -198,6 +198,18 @@ describe("migrateStateVersion", () => {
 });
 
 describe("withFileLock bestEffort", () => {
+  it("steals a lock whose holder pid is dead", async () => {
+    const dir = await scratchDir();
+    const lockPath = join(dir, "x.lock");
+    await writeFile(lockPath, JSON.stringify({ pid: 2 ** 30, host: hostname(), createdAtMs: 0 }));
+    const outcome = await withFileLock(lockPath, async (locked) => locked, {
+      maxWaitMs: 1000,
+      pollMs: 5,
+      label: "test lock",
+    });
+    expect(outcome).toEqual({ value: true, locked: true });
+  });
+
   it("runs unlocked when bestEffort and the holder never releases", async () => {
     const dir = await scratchDir();
     const lockPath = join(dir, "x.lock");
