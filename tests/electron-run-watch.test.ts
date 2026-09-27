@@ -202,6 +202,39 @@ describe("startRunWatch", () => {
     watch.stop();
   });
 
+  it("re-authenticates once when a poll returns 401", async () => {
+    const orig = globalThis.fetch;
+    let cookieGen = 0;
+    const fetches: string[] = [];
+    globalThis.fetch = (async (url, init) => {
+      const href = String(url);
+      fetches.push(`${init?.method ?? "GET"} ${href}`);
+      if (href.endsWith("/api/auth")) {
+        cookieGen += 1;
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "set-cookie": `sid=${cookieGen}` },
+        });
+      }
+      const cookie =
+        init && typeof init.headers === "object" && !Array.isArray(init.headers)
+          ? (init.headers as Record<string, string>).cookie
+          : undefined;
+      if (cookie === "sid=1") return new Response("", { status: 401 });
+      return new Response(JSON.stringify({ runs: [] }), { status: 200 });
+    }) as typeof fetch;
+    const watch = startRunWatch({ origin: "http://127.0.0.1:9", authToken: "launch-token" });
+    try {
+      await settle();
+      await watch.refresh();
+      expect(fetches.filter((f) => f.includes("/api/auth")).length).toBeGreaterThanOrEqual(2);
+      expect(fetches.some((f) => f.includes("/api/runs"))).toBe(true);
+    } finally {
+      watch.stop();
+      globalThis.fetch = orig;
+    }
+  });
+
   it("stops polling once stopped", async () => {
     vi.useFakeTimers();
     try {

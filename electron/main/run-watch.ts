@@ -133,6 +133,11 @@ async function defaultFetchRuns(origin: string, cookie?: string): Promise<RunSum
     signal: AbortSignal.timeout(REQUEST_MS),
     headers: authHeaders(origin, cookie),
   });
+  if (res.status === 401) {
+    const err = new Error("GET /api/runs -> 401") as Error & { unauthorized?: boolean };
+    err.unauthorized = true;
+    throw err;
+  }
   if (!res.ok) throw new Error(`GET /api/runs -> ${res.status}`);
   const body: unknown = await res.json();
   const runs = (body as { runs?: unknown }).runs;
@@ -140,11 +145,16 @@ async function defaultFetchRuns(origin: string, cookie?: string): Promise<RunSum
 }
 
 async function defaultCancelRun(origin: string, id: string, cookie?: string): Promise<void> {
-  await fetch(`${origin}/api/runs/${encodeURIComponent(id)}/cancel`, {
+  const res = await fetch(`${origin}/api/runs/${encodeURIComponent(id)}/cancel`, {
     method: "POST",
     signal: AbortSignal.timeout(REQUEST_MS),
     headers: authHeaders(origin, cookie, true),
   });
+  if (res.status === 401) {
+    const err = new Error("POST /api/runs/cancel -> 401") as Error & { unauthorized?: boolean };
+    err.unauthorized = true;
+    throw err;
+  }
 }
 
 /**
@@ -181,11 +191,22 @@ export function startRunWatch(options: StartRunWatchOptions): RunWatch {
     cookie = await sessionCookie(origin, authToken);
     return cookie;
   };
+  const isUnauthorized = (err: unknown): boolean =>
+    Boolean(err && typeof err === "object" && (err as { unauthorized?: boolean }).unauthorized);
+  const withAuthRetry = async <T>(op: (cookie?: string) => Promise<T>): Promise<T> => {
+    try {
+      return await op(await cookieFor());
+    } catch (err) {
+      if (!authToken || !isUnauthorized(err)) throw err;
+      cookie = undefined;
+      return op(await cookieFor());
+    }
+  };
   const fetchRuns =
-    options.fetchRuns ?? (async (url: string) => defaultFetchRuns(url, await cookieFor()));
+    options.fetchRuns ?? ((url: string) => withAuthRetry((c) => defaultFetchRuns(url, c)));
   const cancelRun =
     options.cancelRun ??
-    (async (url: string, id: string) => defaultCancelRun(url, id, await cookieFor()));
+    ((url: string, id: string) => withAuthRetry((c) => defaultCancelRun(url, id, c)));
 
   let snapshot: RunSummary[] = [];
   let active = 0;
