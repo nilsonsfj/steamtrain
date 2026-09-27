@@ -27,6 +27,30 @@ describe("parseUnifiedDiff", () => {
     expect(diffFileLineCounts(file)).toEqual({ additions: 1, deletions: 1 });
   });
 
+  it("parses a multi-file unified diff without diff --git headers", () => {
+    const patch = [
+      "--- a/one.txt",
+      "+++ b/one.txt",
+      "@@ -1 +1 @@",
+      "-old-one",
+      "+new-one",
+      "--- a/two.txt",
+      "+++ b/two.txt",
+      "@@ -1 +1 @@",
+      "-old-two",
+      "+new-two",
+      "",
+    ].join("\n");
+    const files = parseUnifiedDiff(patch);
+    expect(files).toHaveLength(2);
+    expect(files[0]!.oldPath).toBe("one.txt");
+    expect(files[0]!.newPath).toBe("one.txt");
+    expect(diffFileLineCounts(files[0]!)).toEqual({ additions: 1, deletions: 1 });
+    expect(files[1]!.oldPath).toBe("two.txt");
+    expect(files[1]!.newPath).toBe("two.txt");
+    expect(diffFileLineCounts(files[1]!)).toEqual({ additions: 1, deletions: 1 });
+  });
+
   it("parses a plain unified diff without a/ or b/ path prefixes", () => {
     const patch = [
       "--- old.json",
