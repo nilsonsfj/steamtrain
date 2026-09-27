@@ -1105,6 +1105,10 @@ async function* runDagScheduler(env: RunEnv): AsyncGenerator<WorkflowEvent, bool
   const driver = (async () => {
     const inFlight = new Map<string, Promise<void>>();
     while (true) {
+      // Let the consumer process events already in the channel (a pause, an
+      // abort) before scanning for the next launch, so steering cannot lose a
+      // race against a DAG that finishes a wave in the same tick it started.
+      await Promise.resolve();
       // A reached cost budget stops scheduling NEW steps; in-flight steps run to
       // completion, and any still-pending steps stay pending (recorded as
       // not-run), so raising the cap and resuming replays the cache and picks up
