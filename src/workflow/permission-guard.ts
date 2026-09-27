@@ -134,11 +134,48 @@ export function describeViolations(paths: readonly string[], limit = 8): string 
 }
 
 /**
+ * The engine's own links in a fresh worktree, by repo-relative path, with the
+ * target each one had when the step started. `linkedIgnoredPaths` (the lease's)
+ * are ignored dependencies and build output linked back to the source checkout
+ * so an agent can use them. They lead out of the workspace by design, and the
+ * fingerprint already leaves them out, so {@link findOutboundSymlinks} accepts
+ * them, but only while they still point where they did here.
+ */
+export async function linkedTargets(
+  cwd: string,
+  linkedIgnoredPaths: readonly string[] | undefined,
+  signal?: AbortSignal,
+): Promise<Map<string, string>> {
+  const targets = new Map<string, string>();
+  if (!linkedIgnoredPaths?.length) return targets;
+  try {
+    const top = (await runGitText(["rev-parse", "--show-toplevel"], cwd, signal)).trim();
+    for (const rel of linkedIgnoredPaths) {
+      try {
+        const abs = join(top, rel);
+        if ((await lstat(abs)).isSymbolicLink()) targets.set(rel, await readlink(abs));
+      } catch {
+        // Gone already: nothing to accept, and nothing left to write through.
+      }
+    }
+  } catch {
+    // Not a repository: `findOutboundSymlinks` finds nothing there either.
+  }
+  return targets;
+}
+
+/**
  * Paths of symlinks under `cwd` whose targets resolve outside the workspace.
  * Used before read-only steps so an agent cannot exfiltrate or mutate bytes
- * through a pre-existing outbound link the tree-hash fingerprint would miss.
+ * through a pre-existing outbound link the tree-hash fingerprint would miss,
+ * and after them, so it cannot leave one behind. A link in `accepted` (from
+ * {@link linkedTargets}) with its recorded target is the engine's own.
  */
-export async function findOutboundSymlinks(cwd: string, signal?: AbortSignal): Promise<string[]> {
+export async function findOutboundSymlinks(
+  cwd: string,
+  options: { accepted?: ReadonlyMap<string, string>; signal?: AbortSignal } = {},
+): Promise<string[]> {
+  const { accepted, signal } = options;
   try {
     // Cached + untracked (honoring gitignore), same surface the fingerprint sees.
     const out = await runGitText(
@@ -146,6 +183,10 @@ export async function findOutboundSymlinks(cwd: string, signal?: AbortSignal): P
       cwd,
       signal,
     );
+    // `accepted` is keyed from the worktree root; `ls-files` answers from `cwd`.
+    const prefix = accepted?.size
+      ? (await runGitText(["rev-parse", "--show-prefix"], cwd, signal)).trim()
+      : "";
     const violations: string[] = [];
     const root = resolve(cwd);
     for (const rel of out.split("\0")) {
@@ -155,6 +196,7 @@ export async function findOutboundSymlinks(cwd: string, signal?: AbortSignal): P
         const st = await lstat(abs);
         if (!st.isSymbolicLink()) continue;
         const target = await readlink(abs);
+        if (accepted?.get(`${prefix}${rel}`) === target) continue;
         const resolved = resolve(dirname(abs), target);
         const relToCwd = relative(root, resolved);
         if (isOutside(relToCwd)) {

@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -289,6 +289,127 @@ describe("read-only workspace verification", () => {
     expect(result?.ok).toBe(true);
     expect(result?.permissions?.violations).toBeUndefined();
     expect(result?.permissions?.verified).toBe(true);
+  });
+
+  it("passes in a repo with ignored dependencies and build output", async () => {
+    const root = await tempDir();
+    const repo = join(root, "repo");
+    await initRepo(repo, { ".gitignore": "node_modules/\ndist/\n" });
+    // The worktree gets these as symlinks back into the checkout. A directory
+    // pattern like `node_modules/` does not match a symlink, so they show up
+    // as untracked links that lead out of the workspace.
+    await mkdir(join(repo, "node_modules", "pkg"), { recursive: true });
+    await writeFile(join(repo, "node_modules", "pkg", "index.js"), "module.exports = 1;\n");
+    await mkdir(join(repo, "dist"), { recursive: true });
+    await writeFile(join(repo, "dist", "out.js"), "built\n");
+
+    const events = await collect(reviewSpec("read-only", "claude"), {
+      createAdapter: fakeAdapter([]),
+      maxConcurrency: 1,
+      cwd: repo,
+      agentWorkspace: createGitWorktreeManager({
+        baseDir: join(root, "worktrees"),
+        runId: "run-perm-links",
+      }),
+    });
+
+    const result = doneResult(events, "review");
+    expect(result?.error).toBeUndefined();
+    expect(result?.ok).toBe(true);
+    expect(result?.permissions?.verified).toBe(true);
+  });
+
+  it("passes when the step runs in a subdirectory with its own ignored dependencies", async () => {
+    const root = await tempDir();
+    const repo = join(root, "repo");
+    await initRepo(repo, { ".gitignore": "node_modules/\n", "pkg/README.md": "pkg\n" });
+    await mkdir(join(repo, "pkg", "node_modules", "dep"), { recursive: true });
+    await writeFile(join(repo, "pkg", "node_modules", "dep", "index.js"), "1\n");
+
+    const spec = reviewSpec("read-only", "claude");
+    (spec.phases[0]?.steps[0] as { cwd?: string }).cwd = "pkg";
+    const events = await collect(spec, {
+      createAdapter: fakeAdapter([]),
+      maxConcurrency: 1,
+      cwd: repo,
+      agentWorkspace: createGitWorktreeManager({
+        baseDir: join(root, "worktrees"),
+        runId: "run-perm-subdir",
+      }),
+    });
+
+    const result = doneResult(events, "review");
+    expect(result?.error).toBeUndefined();
+    expect(result?.ok).toBe(true);
+  });
+
+  it("fails a step that re-points a linked dependency somewhere else", async () => {
+    const root = await tempDir();
+    const repo = join(root, "repo");
+    await initRepo(repo, { ".gitignore": "node_modules/\n" });
+    await mkdir(join(repo, "node_modules"), { recursive: true });
+    await writeFile(join(repo, "node_modules", "dep.js"), "1\n");
+    const elsewhere = join(root, "elsewhere");
+    await mkdir(elsewhere, { recursive: true });
+
+    // The fingerprint leaves the engine's links out, so only the symlink check
+    // can see one swapped for a link to somewhere the step was never given.
+    const repointer = (id: AgentId): AgentAdapter => ({
+      id,
+      binary: "fake",
+      defaultModel: "test",
+      run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
+        return (async function* () {
+          if (opts.cwd) {
+            await rm(join(opts.cwd, "node_modules"));
+            await symlink(elsewhere, join(opts.cwd, "node_modules"));
+          }
+          yield { kind: "result", agent: id, ts: 0, isError: false, text: "ok" } as AgentEvent;
+        })();
+      },
+    });
+
+    const events = await collect(reviewSpec("read-only", "claude"), {
+      createAdapter: repointer,
+      maxConcurrency: 1,
+      cwd: repo,
+      agentWorkspace: createGitWorktreeManager({
+        baseDir: join(root, "worktrees"),
+        runId: "run-perm-repoint",
+      }),
+    });
+
+    const result = doneResult(events, "review");
+    expect(result?.ok).toBe(false);
+    expect(result?.permissions?.violations).toEqual([`L node_modules -> ${elsewhere}`]);
+  });
+
+  it("still refuses a committed symlink that leads out of the repository", async () => {
+    const root = await tempDir();
+    const repo = join(root, "repo");
+    const outside = join(root, "outside");
+    await mkdir(outside, { recursive: true });
+    await initRepo(repo);
+    await symlink(outside, join(repo, "escape"));
+    await git(repo, "add", "escape");
+    await git(repo, "commit", "-m", "link");
+
+    const calls: AgentRunOptions[] = [];
+    const events = await collect(reviewSpec("read-only", "claude"), {
+      createAdapter: fakeAdapter(calls),
+      maxConcurrency: 1,
+      cwd: repo,
+      agentWorkspace: createGitWorktreeManager({
+        baseDir: join(root, "worktrees"),
+        runId: "run-perm-escape",
+      }),
+    });
+
+    const result = doneResult(events, "review");
+    expect(result?.ok).toBe(false);
+    expect(result?.error).toMatch(/outbound symlink/);
+    expect(result?.permissions?.violations).toEqual([`L escape -> ${outside}`]);
+    expect(calls).toHaveLength(0);
   });
 
   it("judges an attached step against ITS OWN baseline, not the repo's cleanliness", async () => {
@@ -658,12 +779,16 @@ async function tempDir(): Promise<string> {
   return dir;
 }
 
-async function initRepo(repo: string): Promise<void> {
+async function initRepo(repo: string, files: Record<string, string> = {}): Promise<void> {
   await mkdir(repo, { recursive: true });
   await git(repo, "init");
   await git(repo, "config", "user.email", "test@example.com");
   await git(repo, "config", "user.name", "Test User");
   await writeFile(join(repo, "README.md"), "hello\n");
+  for (const [path, content] of Object.entries(files)) {
+    await mkdir(dirname(join(repo, path)), { recursive: true });
+    await writeFile(join(repo, path), content);
+  }
   await git(repo, "add", ".");
   await git(repo, "commit", "-m", "initial");
 }

@@ -101,6 +101,7 @@ import {
   findOutboundSymlinks,
   fingerprintChanges,
   fingerprintWorkspace,
+  linkedTargets,
 } from "./permission-guard";
 import { createChannel, runPool } from "./pool";
 import {
@@ -2642,8 +2643,13 @@ async function executeAgentStep(
   const declaredPermissions = stepPermissions(step, ctx);
   const verifyWorkspace = declaredPermissions?.verify === true;
   let baseline: WorkspaceFingerprint | undefined;
+  let acceptedLinks: Map<string, string> | undefined;
   if (verifyWorkspace) {
-    const outbound = await findOutboundSymlinks(workspace.cwd, ctx.signal);
+    acceptedLinks = await linkedTargets(workspace.cwd, workspace.linkedIgnoredPaths, ctx.signal);
+    const outbound = await findOutboundSymlinks(workspace.cwd, {
+      accepted: acceptedLinks,
+      signal: ctx.signal,
+    });
     if (outbound.length > 0) {
       await workspace.dispose();
       const message = `permission violation: read-only step '${stepId}' workspace has outbound symlink(s) (${outbound.length}: ${describeViolations(outbound)})`;
@@ -2849,6 +2855,7 @@ async function executeAgentStep(
         stepId,
         cwd: workspace.cwd,
         linkedIgnoredPaths: workspace.linkedIgnoredPaths,
+        acceptedLinks,
         baseline,
         signal: ctx.signal,
       });
@@ -2884,6 +2891,8 @@ async function verifyReadOnlyWorkspace(
     stepId: string;
     cwd: string;
     linkedIgnoredPaths?: string[];
+    /** The engine's own links as the step found them (`linkedTargets`). */
+    acceptedLinks?: ReadonlyMap<string, string>;
     baseline?: WorkspaceFingerprint;
     signal?: AbortSignal;
   },
@@ -2895,7 +2904,10 @@ async function verifyReadOnlyWorkspace(
   });
   const verified = Boolean(baseline && after);
   const treeViolations = await fingerprintChanges(baseline, after, signal);
-  const symlinkViolations = await findOutboundSymlinks(cwd, signal);
+  const symlinkViolations = await findOutboundSymlinks(cwd, {
+    accepted: params.acceptedLinks,
+    signal,
+  });
   const violations = [...treeViolations, ...symlinkViolations];
   const record = {
     // The fallback is a safety net, not a normal path: verification only runs
