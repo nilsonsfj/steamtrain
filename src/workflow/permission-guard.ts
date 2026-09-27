@@ -150,9 +150,9 @@ export function describeViolations(paths: readonly string[], limit = 8): string 
  */
 export async function linkedTargets(
   cwd: string,
-  linkedIgnoredPaths: readonly string[] | undefined,
-  signal?: AbortSignal,
+  options: { linkedIgnoredPaths?: readonly string[]; signal?: AbortSignal } = {},
 ): Promise<Map<string, string>> {
+  const { linkedIgnoredPaths, signal } = options;
   const targets = new Map<string, string>();
   if (!linkedIgnoredPaths?.length) return targets;
   try {
@@ -193,13 +193,19 @@ export async function findOutboundSymlinks(
       signal,
     );
     // `accepted` is keyed from the worktree root; `ls-files` answers from `cwd`.
+    // Without the prefix nothing is accepted, so the engine's links are
+    // reported like any other: failing closed, not skipping the check.
     const prefix = accepted?.size
-      ? (await runGitText(["rev-parse", "--show-prefix"], cwd, signal)).trim()
+      ? await runGitText(["rev-parse", "--show-prefix"], cwd, signal).then(
+          (out) => out.trim(),
+          () => undefined,
+        )
       : "";
+    const recorded = prefix === undefined ? undefined : accepted;
     const violations: string[] = [];
     const root = resolve(cwd);
     for (const rel of out.split("\0")) {
-      if (!rel || accepted?.has(`${prefix}${rel}`)) continue;
+      if (!rel || recorded?.has(`${prefix}${rel}`)) continue;
       const abs = join(cwd, rel);
       try {
         const st = await lstat(abs);
@@ -214,17 +220,17 @@ export async function findOutboundSymlinks(
         // Broken / raced symlink — ignore; fingerprint will still see tree churn.
       }
     }
-    for (const [key, recorded] of accepted ?? []) {
+    for (const [key, expected] of recorded ?? []) {
       // A link outside `cwd` is outside what this step was given to work in.
-      if (!key.startsWith(prefix)) continue;
-      const rel = key.slice(prefix.length);
-      const st = await lstat(join(cwd, rel)).catch(() => undefined);
-      if (!st) violations.push(`D ${rel}`);
+      if (!key.startsWith(prefix ?? "")) continue;
+      const rel = key.slice((prefix ?? "").length);
+      const abs = join(cwd, rel);
+      const st = await lstat(abs).catch(() => undefined);
+      // A link gone between `lstat` and `readlink` is as gone as one never found.
+      const target = st?.isSymbolicLink() ? await readlink(abs).catch(() => undefined) : undefined;
+      if (!st || (st.isSymbolicLink() && target === undefined)) violations.push(`D ${rel}`);
       else if (!st.isSymbolicLink()) violations.push(`T ${rel}`);
-      else {
-        const target = await readlink(join(cwd, rel));
-        if (target !== recorded) violations.push(`L ${rel} -> ${target}`);
-      }
+      else if (target !== expected) violations.push(`L ${rel} -> ${target}`);
     }
     return violations;
   } catch {

@@ -2645,7 +2645,10 @@ async function executeAgentStep(
   let baseline: WorkspaceFingerprint | undefined;
   let acceptedLinks: Map<string, string> | undefined;
   if (verifyWorkspace) {
-    acceptedLinks = await linkedTargets(workspace.cwd, workspace.linkedIgnoredPaths, ctx.signal);
+    acceptedLinks = await linkedTargets(workspace.cwd, {
+      linkedIgnoredPaths: workspace.linkedIgnoredPaths,
+      signal: ctx.signal,
+    });
     const outbound = await findOutboundSymlinks(workspace.cwd, {
       accepted: acceptedLinks,
       signal: ctx.signal,

@@ -341,13 +341,15 @@ describe("read-only workspace verification", () => {
     const result = doneResult(events, "review");
     expect(result?.error).toBeUndefined();
     expect(result?.ok).toBe(true);
+    expect(result?.permissions?.verified).toBe(true);
   });
 
   // The fingerprint leaves the engine's links out, so only the symlink check
-  // can see one of them gone, replaced, or pointing somewhere else.
+  // can see one of them gone, replaced, or pointing somewhere else. A new link
+  // is caught by both.
   it.each([
     {
-      name: "re-pointed out of the workspace",
+      name: "re-points a linked dependency out of the workspace",
       change: async (link: string, elsewhere: string) => {
         await rm(link);
         await symlink(elsewhere, link);
@@ -355,7 +357,7 @@ describe("read-only workspace verification", () => {
       expected: (elsewhere: string) => [`L node_modules -> ${elsewhere}`],
     },
     {
-      name: "re-pointed inside the workspace",
+      name: "re-points a linked dependency inside the workspace",
       change: async (link: string) => {
         await rm(link);
         await symlink("README.md", link);
@@ -363,19 +365,25 @@ describe("read-only workspace verification", () => {
       expected: () => ["L node_modules -> README.md"],
     },
     {
-      name: "deleted",
+      name: "deletes a linked dependency",
       change: (link: string) => rm(link),
       expected: () => ["D node_modules"],
     },
     {
-      name: "replaced with a directory",
+      name: "replaces a linked dependency with a directory",
       change: async (link: string) => {
         await rm(link);
         await mkdir(link);
       },
       expected: () => ["T node_modules"],
     },
-  ])("fails a step whose linked dependency was $name", async ({ change, expected }) => {
+    {
+      name: "creates its own link out of the workspace",
+      change: (link: string, elsewhere: string) =>
+        symlink(elsewhere, join(dirname(link), "escape")),
+      expected: (elsewhere: string) => ["A escape", `L escape -> ${elsewhere}`],
+    },
+  ])("fails a step that $name", async ({ change, expected }) => {
     const root = await tempDir();
     const repo = join(root, "repo");
     await initRepo(repo, { ".gitignore": "node_modules/\n" });
