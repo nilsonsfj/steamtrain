@@ -141,6 +141,7 @@ export async function runShellCommand(
     child.stdout?.on("data", capture);
     child.stderr?.on("data", capture);
 
+    let closeTimer: NodeJS.Timeout | undefined;
     const finish = (exitCode: number | undefined): void => {
       if (settled) return;
       settled = true;
@@ -148,6 +149,7 @@ export async function runShellCommand(
       // Clear the pending SIGKILL escalation so it can't fire after the
       // process already exited (PID/PGID-reuse window).
       if (killTimer) clearTimeout(killTimer);
+      if (closeTimer) clearTimeout(closeTimer);
       opts.signal?.removeEventListener("abort", onAbort);
       let output = Buffer.concat(chunks).toString("utf8");
       if (output.length > MAX_COMMAND_OUTPUT_BYTES) {
@@ -164,6 +166,16 @@ export async function runShellCommand(
     child.on("error", (err) => {
       spawnError = err instanceof Error ? err.message : String(err);
       finish(undefined);
+    });
+    child.on("exit", (code) => {
+      // A backgrounded grandchild can keep stdout/stderr open after the shell
+      // exits, so 'close' never fires. Wait briefly, then drop the pipes.
+      closeTimer = setTimeout(() => {
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        finish(code ?? undefined);
+      }, 250);
+      closeTimer.unref();
     });
     child.on("close", (code) => finish(code ?? undefined));
   });

@@ -694,6 +694,24 @@ describe("runShellCommand", () => {
     expect(result.output).toBe("");
     expect(result.cancelled).toBe(false);
   });
+
+  it("does not hang when a background grandchild keeps stdout open", async () => {
+    const cwd = await tempDir();
+    const pidFile = join(cwd, "bg.pid");
+    const started = Date.now();
+    const result = await runShellCommand(
+      `(node -e 'setTimeout(() => {}, 30000)' & echo $! > "${pidFile}"); echo done`,
+      { cwd },
+    );
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(result.output).toContain("done");
+    expect(result.exitCode).toBe(0);
+    try {
+      process.kill(Number((await readFile(pidFile, "utf8")).trim()), "SIGKILL");
+    } catch {
+      // already gone
+    }
+  });
 });
 
 async function git(cwd: string, ...args: string[]): Promise<string> {
