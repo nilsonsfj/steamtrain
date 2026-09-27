@@ -419,15 +419,17 @@ export async function harvestWorktrees(request: HarvestRequest): Promise<Harvest
   // unlike branch/pr (which keep only the branch ref and discard the checked-
   // out directory), a successful worktree-mode harvest keeps BOTH.
   let keepStagingDir = false;
+  let createdBranch = false;
   try {
     await withRepoWorktreeLock(repoRoot, signal, () =>
       runGit(
-        ["worktree", "add", "-B", branch, stagingDir, targetHead],
+        ["worktree", "add", "-b", branch, stagingDir, targetHead],
         repoRoot,
         undefined,
         signal,
       ),
     );
+    createdBranch = true;
 
     for (const { source, commit } of snapshots) {
       await mergeOneSource(stagingDir, source, commit, request, conflicts, signal);
@@ -483,7 +485,9 @@ export async function harvestWorktrees(request: HarvestRequest): Promise<Harvest
       await runGit(["worktree", "remove", "--force", stagingDir], repoRoot).catch(() => {});
       await rm(stagingDir, { recursive: true, force: true }).catch(() => {});
     }
-    if (!keepBranch) await runGit(["branch", "-D", branch], repoRoot).catch(() => {});
+    if (!keepBranch && createdBranch) {
+      await runGit(["branch", "-D", branch], repoRoot).catch(() => {});
+    }
   }
 }
 
