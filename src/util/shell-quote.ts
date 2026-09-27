@@ -28,3 +28,25 @@ export function shellQuote(value: string, platform: NodeJS.Platform = process.pl
   // POSIX sh: wrap in single quotes; close/reopen around each embedded `'`.
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
+
+/** Quote context at a placeholder: outside quotes, inside `'…'`, or inside `"…"`. */
+export type ShellQuoteContext = "'" | '"' | null;
+
+/**
+ * Quote `value` for interpolation into a command at the given quote context.
+ * Outside quotes this is {@link shellQuote}. Inside quotes, only the
+ * characters that would end or interpolate that quoting are escaped, so
+ * wrapping a placeholder in `"…"` cannot be broken out of.
+ */
+export function shellQuoteInContext(
+  value: string,
+  quote: ShellQuoteContext,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (quote === null) return shellQuote(value, platform);
+  if (platform === "win32") {
+    return quote === '"' ? value.replace(/"/g, '""') : value;
+  }
+  if (quote === "'") return value.replace(/'/g, `'\\''`);
+  return value.replace(/([\\"$`])/g, "\\$1").replace(/\n/g, "\\n");
+}

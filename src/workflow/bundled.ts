@@ -1104,7 +1104,7 @@ const babysitPr: WorkflowSpec = {
           // CONFLICTING at land time. `|| true` because a real content conflict
           // is not a failure here — that is precisely the agent's job next.
           stepTimeoutSec: 300,
-          cmd: '${STEAMTRAIN_CLI:-steamtrain} workflow pr rebase "{{inputs.pr}}" || true',
+          cmd: "${STEAMTRAIN_CLI:-steamtrain} workflow pr rebase {{inputs.pr}} || true",
         },
       ],
     },
@@ -1172,7 +1172,7 @@ const babysitPr: WorkflowSpec = {
           dependsOn: ["prepare"],
           stepTimeoutSec: 300,
           cmd:
-            '${STEAMTRAIN_CLI:-steamtrain} workflow pr require-mergeable "{{inputs.pr}}" ' +
+            "${STEAMTRAIN_CLI:-steamtrain} workflow pr require-mergeable {{inputs.pr}} " +
             "--auto-rebase",
         },
       ],
@@ -1194,7 +1194,7 @@ const babysitPr: WorkflowSpec = {
           // `bun src/index.tsx` without a global install. Fallback to PATH.
           when: { value: "{{inputs.land}}", equals: "merge" },
           cmd:
-            '${STEAMTRAIN_CLI:-steamtrain} workflow pr merge-when-ready "{{inputs.pr}}" ' +
+            "${STEAMTRAIN_CLI:-steamtrain} workflow pr merge-when-ready {{inputs.pr}} " +
             "--timeout-sec {{inputs.checksTimeoutSec}} --strategy {{inputs.mergeStrategy}} " +
             // A sibling landing under the land lock is what makes the remaining
             // PRs conflict; replay the mechanical rebase instead of failing.
@@ -1208,7 +1208,7 @@ const babysitPr: WorkflowSpec = {
           stepTimeoutSec: 2400,
           when: { value: "{{inputs.land}}", equals: "report" },
           cmd:
-            '${STEAMTRAIN_CLI:-steamtrain} workflow pr wait-checks "{{inputs.pr}}" ' +
+            "${STEAMTRAIN_CLI:-steamtrain} workflow pr wait-checks {{inputs.pr}} " +
             "--timeout-sec {{inputs.checksTimeoutSec}}",
         },
       ],

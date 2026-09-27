@@ -22,7 +22,7 @@
  */
 
 import { redactSecrets } from "../util/redact";
-import { shellQuote } from "../util/shell-quote";
+import { type ShellQuoteContext, shellQuoteInContext } from "../util/shell-quote";
 import { jsonFieldText, jsonPathGet } from "./structured";
 import type {
   GateCondition,
@@ -182,8 +182,9 @@ export interface RenderCmdOptions {
 
 /**
  * Render a command-step `cmd` template. Interpolated values are shell-quoted
- * unless `allowShellTemplates` is set (opt-in raw mode for intentional full
- * command injection like `cmd: "{{inputs.testCmd}}"`).
+ * for the quote context they sit in (unquoted / `'…'` / `"…"`), unless
+ * `allowShellTemplates` is set (opt-in raw mode for intentional full command
+ * injection like `cmd: "{{inputs.testCmd}}"`).
  */
 export function renderCmd(
   template: string,
@@ -195,12 +196,45 @@ export function renderCmd(
     return renderPrompt(template, ctx, { redact: true });
   }
   const platform = options.platform ?? process.platform;
-  return template.replace(PLACEHOLDER, (match, exprRaw: string) => {
-    const expr = exprRaw.trim();
-    const value = resolveTemplateValue(expr, ctx);
-    if (value === undefined) return match;
-    return shellQuote(redactSecrets(value), platform);
-  });
+  let out = "";
+  let quote: ShellQuoteContext = null;
+  let i = 0;
+  while (i < template.length) {
+    const ph = template.slice(i).match(/^\{\{\s*([^{}]+?)\s*\}\}/);
+    if (ph) {
+      const value = resolveTemplateValue(ph[1]!.trim(), ctx);
+      out +=
+        value === undefined ? ph[0] : shellQuoteInContext(redactSecrets(value), quote, platform);
+      i += ph[0].length;
+      continue;
+    }
+    const ch = template[i]!;
+    if (platform === "win32") {
+      if (quote === '"' && ch === '"' && template[i + 1] === '"') {
+        out += '""';
+        i += 2;
+        continue;
+      }
+      if (ch === '"') quote = quote === '"' ? null : '"';
+      out += ch;
+      i += 1;
+      continue;
+    }
+    if (quote === null) {
+      if (ch === "'" || ch === '"') quote = ch;
+    } else if (quote === "'") {
+      if (ch === "'") quote = null;
+    } else if (ch === "\\" && i + 1 < template.length) {
+      out += ch + template[i + 1];
+      i += 2;
+      continue;
+    } else if (ch === '"') {
+      quote = null;
+    }
+    out += ch;
+    i += 1;
+  }
+  return out;
 }
 
 // ---- Template reference linting (2.8) ----

@@ -36,6 +36,24 @@ describe("shellQuote / renderCmd", () => {
     );
     expect(cmd).toBe("npm test");
   });
+
+  it("escapes a value sitting inside double quotes instead of wrapping it", () => {
+    const cmd = renderCmd(
+      'echo "{{input}}"',
+      { input: 'x"; rm -rf /; echo "', outputs: new Map() },
+      { platform: "linux" },
+    );
+    expect(cmd).toBe('echo "x\\"; rm -rf /; echo \\""');
+  });
+
+  it("escapes a value sitting inside single quotes", () => {
+    const cmd = renderCmd(
+      "echo '{{input}}'",
+      { input: "it's", outputs: new Map() },
+      { platform: "linux" },
+    );
+    expect(cmd).toBe(`echo 'it'\\''s'`);
+  });
 });
 
 describe("redactSecrets / renderPrompt", () => {
