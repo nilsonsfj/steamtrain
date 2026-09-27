@@ -39,9 +39,16 @@ export interface WorkspaceFingerprint {
   tree: string;
 }
 
-/** Paths pathspec-excluded from every fingerprint (engine-owned runtime state). */
+/**
+ * Paths pathspec-excluded from every fingerprint (engine-owned runtime state).
+ * The linked paths are relative to the worktree root, not to the step's cwd,
+ * hence `top`.
+ */
 function excludeArgs(linkedIgnoredPaths?: readonly string[]): string[] {
-  return [`:!${STEAMTRAIN_STATE_DIR}`, ...(linkedIgnoredPaths ?? []).map((path) => `:!${path}`)];
+  return [
+    `:!${STEAMTRAIN_STATE_DIR}`,
+    ...(linkedIgnoredPaths ?? []).map((path) => `:(top,exclude)${path}`),
+  ];
 }
 
 /**
@@ -168,8 +175,10 @@ export async function linkedTargets(
  * Paths of symlinks under `cwd` whose targets resolve outside the workspace.
  * Used before read-only steps so an agent cannot exfiltrate or mutate bytes
  * through a pre-existing outbound link the tree-hash fingerprint would miss,
- * and after them, so it cannot leave one behind. A link in `accepted` (from
- * {@link linkedTargets}) with its recorded target is the engine's own.
+ * and after them, so it cannot leave one behind. The links in `accepted` (from
+ * {@link linkedTargets}) are the engine's own. Each must still be there, still a
+ * link, with its recorded target: gone is reported as `D`, replaced by a file or
+ * directory as `T`, re-pointed as `L`, as the fingerprint leaves them out.
  */
 export async function findOutboundSymlinks(
   cwd: string,
@@ -190,13 +199,12 @@ export async function findOutboundSymlinks(
     const violations: string[] = [];
     const root = resolve(cwd);
     for (const rel of out.split("\0")) {
-      if (!rel) continue;
+      if (!rel || accepted?.has(`${prefix}${rel}`)) continue;
       const abs = join(cwd, rel);
       try {
         const st = await lstat(abs);
         if (!st.isSymbolicLink()) continue;
         const target = await readlink(abs);
-        if (accepted?.get(`${prefix}${rel}`) === target) continue;
         const resolved = resolve(dirname(abs), target);
         const relToCwd = relative(root, resolved);
         if (isOutside(relToCwd)) {
@@ -204,6 +212,18 @@ export async function findOutboundSymlinks(
         }
       } catch {
         // Broken / raced symlink — ignore; fingerprint will still see tree churn.
+      }
+    }
+    for (const [key, recorded] of accepted ?? []) {
+      // A link outside `cwd` is outside what this step was given to work in.
+      if (!key.startsWith(prefix)) continue;
+      const rel = key.slice(prefix.length);
+      const st = await lstat(join(cwd, rel)).catch(() => undefined);
+      if (!st) violations.push(`D ${rel}`);
+      else if (!st.isSymbolicLink()) violations.push(`T ${rel}`);
+      else {
+        const target = await readlink(join(cwd, rel));
+        if (target !== recorded) violations.push(`L ${rel} -> ${target}`);
       }
     }
     return violations;

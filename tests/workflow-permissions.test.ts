@@ -343,7 +343,39 @@ describe("read-only workspace verification", () => {
     expect(result?.ok).toBe(true);
   });
 
-  it("fails a step that re-points a linked dependency somewhere else", async () => {
+  // The fingerprint leaves the engine's links out, so only the symlink check
+  // can see one of them gone, replaced, or pointing somewhere else.
+  it.each([
+    {
+      name: "re-pointed out of the workspace",
+      change: async (link: string, elsewhere: string) => {
+        await rm(link);
+        await symlink(elsewhere, link);
+      },
+      expected: (elsewhere: string) => [`L node_modules -> ${elsewhere}`],
+    },
+    {
+      name: "re-pointed inside the workspace",
+      change: async (link: string) => {
+        await rm(link);
+        await symlink("README.md", link);
+      },
+      expected: () => ["L node_modules -> README.md"],
+    },
+    {
+      name: "deleted",
+      change: (link: string) => rm(link),
+      expected: () => ["D node_modules"],
+    },
+    {
+      name: "replaced with a directory",
+      change: async (link: string) => {
+        await rm(link);
+        await mkdir(link);
+      },
+      expected: () => ["T node_modules"],
+    },
+  ])("fails a step whose linked dependency was $name", async ({ change, expected }) => {
     const root = await tempDir();
     const repo = join(root, "repo");
     await initRepo(repo, { ".gitignore": "node_modules/\n" });
@@ -352,36 +384,31 @@ describe("read-only workspace verification", () => {
     const elsewhere = join(root, "elsewhere");
     await mkdir(elsewhere, { recursive: true });
 
-    // The fingerprint leaves the engine's links out, so only the symlink check
-    // can see one swapped for a link to somewhere the step was never given.
-    const repointer = (id: AgentId): AgentAdapter => ({
+    const tamperer = (id: AgentId): AgentAdapter => ({
       id,
       binary: "fake",
       defaultModel: "test",
       run(opts: AgentRunOptions): AsyncIterable<AgentEvent> {
         return (async function* () {
-          if (opts.cwd) {
-            await rm(join(opts.cwd, "node_modules"));
-            await symlink(elsewhere, join(opts.cwd, "node_modules"));
-          }
+          if (opts.cwd) await change(join(opts.cwd, "node_modules"), elsewhere);
           yield { kind: "result", agent: id, ts: 0, isError: false, text: "ok" } as AgentEvent;
         })();
       },
     });
 
     const events = await collect(reviewSpec("read-only", "claude"), {
-      createAdapter: repointer,
+      createAdapter: tamperer,
       maxConcurrency: 1,
       cwd: repo,
       agentWorkspace: createGitWorktreeManager({
         baseDir: join(root, "worktrees"),
-        runId: "run-perm-repoint",
+        runId: "run-perm-tamper",
       }),
     });
 
     const result = doneResult(events, "review");
     expect(result?.ok).toBe(false);
-    expect(result?.permissions?.violations).toEqual([`L node_modules -> ${elsewhere}`]);
+    expect(result?.permissions?.violations).toEqual(expected(elsewhere));
   });
 
   it("still refuses a committed symlink that leads out of the repository", async () => {
@@ -520,6 +547,21 @@ describe("fingerprintWorkspace", () => {
     const dirtier = await fingerprintWorkspace(repo);
     expect(dirtier?.tree).not.toBe(dirty?.tree);
     expect((await fingerprintChanges(dirty, dirtier)).join(" ")).toContain("README.md");
+  });
+
+  it("leaves the engine's links out when the step runs in a subdirectory", async () => {
+    const root = await tempDir();
+    const repo = join(root, "repo");
+    await initRepo(repo, { ".gitignore": "node_modules/\n", "pkg/README.md": "pkg\n" });
+    await mkdir(join(root, "deps"), { recursive: true });
+    // Linked paths are relative to the worktree root, not to the step's cwd.
+    await symlink(join(root, "deps"), join(repo, "pkg", "node_modules"));
+    const options = { linkedIgnoredPaths: ["pkg/node_modules"] };
+
+    const before = await fingerprintWorkspace(join(repo, "pkg"), options);
+    await rm(join(repo, "pkg", "node_modules"));
+    const after = await fingerprintWorkspace(join(repo, "pkg"), options);
+    expect(after?.tree).toBe(before?.tree);
   });
 
   it("reports no changes and no fingerprint outside a repository", async () => {
