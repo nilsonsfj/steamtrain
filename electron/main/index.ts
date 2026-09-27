@@ -247,6 +247,7 @@ async function openProject(cwd: string): Promise<void> {
 
   watch = startRunWatch({
     origin,
+    authToken: handle.ready.authToken,
     onActiveCount: showActivity,
     onFinished: announce,
   });
