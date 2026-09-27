@@ -687,6 +687,13 @@ describe("runShellCommand", () => {
     expect(result.cancelled).toBe(true);
     expect(result.exitCode).toBeUndefined();
   });
+
+  it("resolves with spawnError instead of rejecting when spawn throws synchronously", async () => {
+    const result = await runShellCommand("echo \0hello", { cwd: process.cwd() });
+    expect(result.spawnError).toBeDefined();
+    expect(result.output).toBe("");
+    expect(result.cancelled).toBe(false);
+  });
 });
 
 async function git(cwd: string, ...args: string[]): Promise<string> {

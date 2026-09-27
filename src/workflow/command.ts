@@ -66,16 +66,30 @@ export async function runShellCommand(
 
     // detached puts the command in its own process group so kills reach the
     // whole tree (`npm test` spawning node spawning workers), not just the shell.
-    const child = spawn(cmd, {
-      shell: true,
-      cwd: opts.cwd,
-      detached: process.platform !== "win32",
-      stdio: ["ignore", "pipe", "pipe"],
-      // Always build the env explicitly (rather than inheriting by omission) so
-      // ELECTRON_RUN_AS_NODE never reaches a user's command under the desktop
-      // app. `$STEAMTRAIN_CLI` re-adds it via `env ELECTRON_RUN_AS_NODE=1 …`.
-      env: childEnv(opts.env),
-    });
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(cmd, {
+        shell: true,
+        cwd: opts.cwd,
+        detached: process.platform !== "win32",
+        stdio: ["ignore", "pipe", "pipe"],
+        // Always build the env explicitly (rather than inheriting by omission) so
+        // ELECTRON_RUN_AS_NODE never reaches a user's command under the desktop
+        // app. `$STEAMTRAIN_CLI` re-adds it via `env ELECTRON_RUN_AS_NODE=1 …`.
+        env: childEnv(opts.env),
+      });
+    } catch (err) {
+      // Synchronous spawn failures (E2BIG, NUL in the command string) throw
+      // rather than emitting 'error'. Resolve so the executor never rejects.
+      resolve({
+        output: "",
+        truncated: false,
+        timedOut: false,
+        cancelled: false,
+        spawnError: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
 
     const killTree = (sig: NodeJS.Signals): void => {
       try {
