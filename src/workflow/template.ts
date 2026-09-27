@@ -452,21 +452,14 @@ export function lintTemplateRefs(spec: WorkflowSpec): string[] {
           continue;
         }
 
-        // {{steps.<id>.<field>}}
+        // {{steps.<id>.<field>}} — json/worktree/artifact MUST be matched
+        // before STEP_FIELD; its greedy id group also eats `json.output`.
         if (!ref.startsWith("steps.")) continue;
-        const stepFieldMatch = STEP_FIELD.exec(ref);
-        if (stepFieldMatch) {
-          const refId = stepFieldMatch[1] as string;
-          const field = stepFieldMatch[2] as string;
+        const jsonMatch = STEP_JSON_FIELD.exec(ref);
+        if (jsonMatch) {
+          const refId = jsonMatch[1] as string;
           if (!stepIds.has(refId)) {
             warnings.push(`step '${step.id}' references unknown step '${refId}'`);
-          } else if (field === "exitCode") {
-            const refStep = findStep(spec, refId);
-            if (refStep && !isCommandStep(refStep)) {
-              warnings.push(
-                `step '${step.id}' references '${refId}.exitCode' but '${refId}' is not a command step (exitCode is only available on command steps)`,
-              );
-            }
           }
           continue;
         }
@@ -503,11 +496,19 @@ export function lintTemplateRefs(spec: WorkflowSpec): string[] {
           continue;
         }
 
-        const jsonMatch = STEP_JSON_FIELD.exec(ref);
-        if (jsonMatch) {
-          const refId = jsonMatch[1] as string;
+        const stepFieldMatch = STEP_FIELD.exec(ref);
+        if (stepFieldMatch) {
+          const refId = stepFieldMatch[1] as string;
+          const field = stepFieldMatch[2] as string;
           if (!stepIds.has(refId)) {
             warnings.push(`step '${step.id}' references unknown step '${refId}'`);
+          } else if (field === "exitCode") {
+            const refStep = findStep(spec, refId);
+            if (refStep && !isCommandStep(refStep)) {
+              warnings.push(
+                `step '${step.id}' references '${refId}.exitCode' but '${refId}' is not a command step (exitCode is only available on command steps)`,
+              );
+            }
           }
           continue;
         }
