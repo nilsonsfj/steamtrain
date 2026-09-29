@@ -2,6 +2,7 @@ import { type ChildProcessByStdio, spawn } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
 import { appendCapped } from "../util/capped-buffer";
 import { childEnv } from "../util/child-env";
+import { killProcessGroup, waitForProcessGroupExit } from "../util/process-group";
 import { LineBuffer } from "./line-buffer";
 
 type PipedChild = ChildProcessByStdio<null, Readable, Readable>;
@@ -113,6 +114,7 @@ export async function* runProcessLines(opts: ProcessRunOptions): AsyncGenerator<
     return;
   }
 
+  const pgid = child.pid;
   const outBuffer = new LineBuffer();
   let sawStdout = false;
   let stderrAll = "";
@@ -122,6 +124,8 @@ export async function* runProcessLines(opts: ProcessRunOptions): AsyncGenerator<
   let settled = false;
   /** True once the OS delivered `close`/`error` — only then is canceling SIGKILL safe. */
   let processExited = false;
+  let cancelKill: (() => void) | undefined;
+  let killed = false;
 
   child.stdout.setEncoding("utf8");
   child.stderr.setEncoding("utf8");
@@ -163,8 +167,10 @@ export async function* runProcessLines(opts: ProcessRunOptions): AsyncGenerator<
 
   const settle = (code: number | null, signal: NodeJS.Signals | null): void => {
     processExited = true;
-    // Process is gone — drop the pending SIGKILL so a recycled PID/PGID is safe.
-    cancelKill?.();
+    // The child handle closed; helpers in the same group may still be alive.
+    // Drop SIGKILL only on a natural exit. A kill path waits for the group
+    // in `finally` before cancelling the timer.
+    if (!killed) cancelKill?.();
     if (settled) {
       // Synthetic exit already yielded; still wake the generator if it is
       // blocked so `finished` can end the loop.
@@ -207,8 +213,6 @@ export async function* runProcessLines(opts: ProcessRunOptions): AsyncGenerator<
 
   let timer: NodeJS.Timeout | undefined;
   let idleTimer: NodeJS.Timeout | undefined;
-  let cancelKill: (() => void) | undefined;
-  let killed = false;
 
   const startKill = (): void => {
     if (killed) return;
@@ -219,7 +223,7 @@ export async function* runProcessLines(opts: ProcessRunOptions): AsyncGenerator<
     }
     // Keep the SIGKILL timer referenced so a synthetic early-exit cannot let
     // the event loop drain before escalation fires on a stubborn child.
-    const { cancel } = killProcessTree(child, { keepAlive: true });
+    const { cancel } = killProcessTree(child, pgid, { keepAlive: true });
     cancelKill = cancel;
     // Wake the generator if it's blocked on waitForItem(), so it can
     // check the `killed` flag and exit instead of re-blocking.
@@ -298,9 +302,14 @@ export async function* runProcessLines(opts: ProcessRunOptions): AsyncGenerator<
     if (idleTimer) clearTimeout(idleTimer);
     opts.signal?.removeEventListener("abort", onAbort);
     if (!settled && !killed) startKill();
-    // Only cancel SIGKILL once the OS confirms the process is gone. Canceling
-    // after a synthetic exit left SIGTERM-immune agents writing the worktree.
-    if (processExited) cancelKill?.();
+    // Adapters return as soon as they see the (possibly synthetic) exit, which
+    // closes this generator. Await the process group here so workspace.dispose
+    // cannot run while a SIGTERM-immune agent is still alive.
+    if (killed || !processExited) {
+      if (!killed) startKill();
+      await waitForProcessGroupExit(pgid, child, SIGKILL_GRACE_MS + 1000);
+    }
+    cancelKill?.();
   }
 }
 
@@ -324,13 +333,14 @@ export function resolveAgentIdleTimeoutMs(opts: {
 
 function killProcessTree(
   child: PipedChild | PipedChildWithStdin,
+  pgid: number | undefined,
   opts?: { keepAlive?: boolean },
 ): { cancel: () => void } {
   let cancelled = false;
-  killTree(child, "SIGTERM");
+  killProcessGroup(pgid, child, "SIGTERM");
   const sigkillTimer = setTimeout(() => {
     if (cancelled) return;
-    killTree(child, "SIGKILL");
+    killProcessGroup(pgid, child, "SIGKILL");
   }, SIGKILL_GRACE_MS);
   // Ref the timer when the caller has already returned a synthetic exit and
   // needs escalation to finish even if nothing else keeps the loop alive.
@@ -342,23 +352,6 @@ function killProcessTree(
       clearTimeout(sigkillTimer);
     },
   };
-}
-
-function killTree(child: PipedChild | PipedChildWithStdin, sig: NodeJS.Signals): void {
-  try {
-    if (process.platform !== "win32" && typeof child.pid === "number") {
-      try {
-        // Negative PID = process group (requires detached spawn above).
-        process.kill(-child.pid, sig);
-        return;
-      } catch {
-        // Not a group leader / already gone — fall through to direct kill.
-      }
-    }
-    child.kill(sig);
-  } catch {
-    // already gone
-  }
 }
 
 function errorMessage(err: unknown): string {

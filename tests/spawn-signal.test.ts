@@ -202,14 +202,11 @@ describe("runProcessLines signal handling", () => {
       expect(exit.timedOut).toBe(true);
       // The marker is written after the SIGTERM handler is installed, so a
       // child that wrote it outlived the SIGTERM the timeout sent.
-      for (let i = 0; i < 50 && !existsSync(marker); i++) await delay(20);
       expect(existsSync(marker), "the child was killed before it started").toBe(true);
       pid = Number(readFileSync(marker, "utf8"));
       expect(pid).toBeGreaterThan(0);
-
-      // Ignoring SIGTERM, it dies only if SIGKILL (~2s after SIGTERM) still fires.
-      for (let i = 0; i < 100 && isAlive(pid); i++) await delay(50);
-      expect(isAlive(pid), "the SIGTERM-immune child outlived the SIGKILL grace").toBe(false);
+      // Generator completion waits for the process group, including SIGKILL.
+      expect(isAlive(pid), "the SIGTERM-immune child outlived generator close").toBe(false);
     } finally {
       if (pid > 0 && isAlive(pid)) process.kill(pid, "SIGKILL");
       try {
@@ -264,9 +261,8 @@ describe("runProcessLines signal handling", () => {
       ac.abort();
       await consumer;
 
-      // Only a kill aimed at the whole group (SIGKILL, ~2s after SIGTERM) reaches it.
-      for (let i = 0; i < 100 && isAlive(helper); i++) await delay(50);
-      expect(isAlive(helper), "the forked helper outlived the group kill").toBe(false);
+      // Generator completion waits for SIGKILL of the whole group.
+      expect(isAlive(helper), "the forked helper outlived generator close").toBe(false);
     } finally {
       ac.abort();
       if (helper > 0 && isAlive(helper)) process.kill(helper, "SIGKILL");
