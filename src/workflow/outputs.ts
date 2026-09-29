@@ -1,8 +1,8 @@
-import { lstat, mkdir, realpath, writeFile } from "node:fs/promises";
+import { lstat, mkdir, realpath } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import type { WorkflowOutputResult } from "./events";
-import { STEAMTRAIN_STATE_DIR, isOutside, sanitizePathComponent } from "./fs-util";
-import { type TemplateContext, renderPrompt, templateStepIds } from "./template";
+import { STEAMTRAIN_STATE_DIR, atomicWriteFile, isOutside, sanitizePathComponent } from "./fs-util";
+import { type TemplateContext, renderPrompt, templateStepReads } from "./template";
 import type { WorkflowSpec } from "./types";
 
 /**
@@ -52,11 +52,11 @@ export async function writeWorkflowOutputs(
 ): Promise<WorkflowOutputResult[]> {
   const timestamp = runTimestamp(new Date(options.startedAt));
   let runDir: Promise<string> | undefined;
-  const written: WorkflowOutputResult[] = [];
+  const all: WorkflowOutputResult[] = [];
   for (const [key, output] of Object.entries(spec.outputs ?? {})) {
     const result: WorkflowOutputResult = { key, written: false };
     if (output.description) result.description = output.description;
-    written.push(result);
+    all.push(result);
     try {
       const unfinished = unfinishedStep(output.value, options.results);
       const chosen = options.paths?.[key];
@@ -88,24 +88,31 @@ export async function writeWorkflowOutputs(
       if (fromSpec) await assertInside(options.cwd, path);
       const text = renderPrompt(output.value, options.context, { redact: false });
       const body = text.endsWith("\n") || text === "" ? text : `${text}\n`;
-      await writeFile(path, body, "utf8");
+      // Written whole or not at all, and by rename, which replaces a symlink
+      // swapped in since the check rather than writing through it.
+      await atomicWriteFile(path, body);
       result.written = true;
       result.bytes = Buffer.byteLength(body);
     } catch (error) {
       result.error = error instanceof Error ? error.message : String(error);
     }
   }
-  return written;
+  return all;
 }
 
-/** Why an output's value cannot be rendered yet: the first step it reads that did not finish ok. */
+/**
+ * Why an output's value cannot be rendered: the first step it reads that did
+ * not finish ok. A step read only for how it ended (`ok`, `error`,
+ * `exitCode`) just has to have run, so an output can report a failure.
+ */
 function unfinishedStep(
   value: string,
   results: WriteOutputsOptions["results"],
 ): string | undefined {
-  for (const id of templateStepIds(value)) {
+  for (const [id, read] of templateStepReads(value)) {
     const result = results.get(id);
     if (!result) return `step '${id}' did not run`;
+    if (read === "status") continue;
     if (result.skipped) return `step '${id}' was skipped`;
     if (!result.ok) return `step '${id}' failed`;
   }

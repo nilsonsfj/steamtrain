@@ -1003,13 +1003,14 @@ export interface WorkflowInputSpec {
  * history.
  */
 export interface WorkflowOutputSpec {
-  /** Human-readable description shown in UIs and help text. */
+  /** What the output is; the web UI shows it with the saved path on hover. */
   description?: string;
   /**
    * Template rendered when the run ends, usually one step's output:
    * `"{{steps.report.output}}"`. Same placeholders as a step prompt, except
    * `{{item}}` and `{{iteration}}`. The file is written only when every step
-   * the template references finished ok.
+   * the template references finished ok; a step read only for `ok`, `error`
+   * or `exitCode` just has to have run.
    */
   value: string;
   /**
