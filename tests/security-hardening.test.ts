@@ -142,6 +142,28 @@ describe("shellQuote / renderCmd", () => {
     expect(out).toBe("x\nEND\nprintf INJECTED\n#\n");
   });
 
+  it("does not let template text before a placeholder complete a here-document delimiter", () => {
+    if (process.platform === "win32") return;
+    const cmd = renderCmd(
+      "cat <<END\nE{{input}}\nEND",
+      { input: "ND\nprintf INJECTED\n#", outputs: new Map() },
+      { platform: "linux" },
+    );
+    const out = execFileSync("sh", ["-c", cmd], { encoding: "utf8" });
+    expect(out).toBe("END\nprintf INJECTED\n#\n");
+  });
+
+  it("does not let template text after a placeholder complete a here-document delimiter", () => {
+    if (process.platform === "win32") return;
+    const cmd = renderCmd(
+      "cat <<END\n{{input}}D\nprintf INJECTED\nEND",
+      { input: "EN", outputs: new Map() },
+      { platform: "linux" },
+    );
+    const out = execFileSync("sh", ["-c", cmd], { encoding: "utf8" });
+    expect(out).toBe("END\nprintf INJECTED\n");
+  });
+
   it("keeps unquoted here-document expansions on other body lines", () => {
     if (process.platform === "win32") return;
     const cmd = renderCmd(

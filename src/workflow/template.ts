@@ -210,7 +210,8 @@ export function renderCmd(
  * `<<` / `<<-` here-documents collect a body where quotes are literal. A
  * placeholder there is inserted with the original delimiter's expansion
  * rules (escaped in an unquoted document, raw in a quoted one). The
- * delimiter is rewritten only when the value would close the document.
+ * delimiter is rewritten when any complete rendered line — including
+ * template text already on that line — would close the document.
  */
 interface PosixFrame {
   quote: ShellQuoteContext;
@@ -263,7 +264,10 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
         if (value === undefined) {
           out += ph[0];
         } else {
-          out = insertHeredocValue(heredoc, allHeredocs, out, redactSecrets(value));
+          const after = i + ph[0].length;
+          const nl = template.indexOf("\n", after);
+          const suffix = nl === -1 ? template.slice(after) : template.slice(after, nl);
+          out = insertHeredocValue(heredoc, allHeredocs, out, redactSecrets(value), suffix);
         }
         i += ph[0].length;
         atLineStart = false;
@@ -506,12 +510,16 @@ function insertHeredocValue(
   all: PendingHeredoc[],
   out: string,
   value: string,
+  suffix: string,
 ): string {
   const closer = doc.closer ?? doc.delimiter;
-  const prefix = valueClosesHeredoc(value, closer, doc.stripTabs)
-    ? rewriteHeredocOpener(doc, all, out, value)
+  const lineStart = out.lastIndexOf("\n") + 1;
+  const prefix = out.slice(lineStart);
+  const rendered = prefix + value + suffix;
+  const next = valueClosesHeredoc(rendered, closer, doc.stripTabs)
+    ? rewriteHeredocOpener(doc, all, out, rendered)
     : out;
-  return prefix + (doc.quoted ? value : value.replace(/[\\$`]/g, "\\$1"));
+  return next + (doc.quoted ? value : value.replace(/[\\$`]/g, "\\$1"));
 }
 
 function valueClosesHeredoc(value: string, delimiter: string, stripTabs: boolean): boolean {
@@ -526,10 +534,10 @@ function rewriteHeredocOpener(
   doc: PendingHeredoc,
   all: PendingHeredoc[],
   out: string,
-  value: string,
+  rendered: string,
 ): string {
   let unique = `STEAMTRAIN_EOF_${randomBytes(16).toString("hex")}`;
-  while (valueClosesHeredoc(value, unique, doc.stripTabs)) {
+  while (valueClosesHeredoc(rendered, unique, doc.stripTabs)) {
     unique = `STEAMTRAIN_EOF_${randomBytes(16).toString("hex")}`;
   }
   const replacement = doc.quoted ? `'${unique}'` : unique;
