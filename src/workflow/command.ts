@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { childEnv } from "../util/child-env";
+import { killProcessGroup, waitForProcessGroupExit } from "../util/process-group";
 
 /**
  * Subprocess plumbing for `command` workflow steps: run one shell command,
@@ -92,20 +93,9 @@ export async function runShellCommand(
     }
 
     const pgid = child.pid;
+    const killGraceMs = opts.killGraceMs ?? 5000;
     const killTree = (sig: NodeJS.Signals): void => {
-      try {
-        if (process.platform !== "win32" && typeof pgid === "number") {
-          try {
-            process.kill(-pgid, sig);
-          } catch {
-            child.kill(sig);
-          }
-        } else {
-          child.kill(sig);
-        }
-      } catch {
-        // already gone
-      }
+      killProcessGroup(pgid, child, sig);
     };
 
     // Timeout and abort both terminate the same way: SIGTERM, then SIGKILL
@@ -118,9 +108,10 @@ export async function runShellCommand(
         killTree("SIGKILL");
         child.stdout?.destroy();
         child.stderr?.destroy();
-        finish(undefined);
-      }, opts.killGraceMs ?? 5000);
-      killTimer.unref();
+        void finishAfterTreeExit(undefined);
+      }, killGraceMs);
+      // Stay referenced: an unref'd SIGKILL lets a headless CLI exit while a
+      // SIGTERM-immune grandchild is still mutating the worktree.
     };
 
     const timer =
@@ -157,10 +148,7 @@ export async function runShellCommand(
       settled = true;
       if (timer) clearTimeout(timer);
       if (closeTimer) clearTimeout(closeTimer);
-      // Keep SIGKILL armed when we asked the tree to die: the shell can exit
-      // while a SIGTERM-immune grandchild still holds the worktree. Clear the
-      // timer only on a natural close, so a reused PGID is not killed later.
-      if (killTimer && !timedOut && !cancelled) clearTimeout(killTimer);
+      if (killTimer) clearTimeout(killTimer);
       opts.signal?.removeEventListener("abort", onAbort);
       let output = Buffer.concat(chunks).toString("utf8");
       if (output.length > MAX_COMMAND_OUTPUT_BYTES) {
@@ -174,6 +162,14 @@ export async function runShellCommand(
       resolve({ exitCode, output, truncated, timedOut, cancelled, spawnError });
     };
 
+    const finishAfterTreeExit = async (exitCode: number | undefined): Promise<void> => {
+      if (settled) return;
+      if (timedOut || cancelled) {
+        await waitForProcessGroupExit(pgid, child, killGraceMs + 1000);
+      }
+      finish(exitCode);
+    };
+
     child.on("error", (err) => {
       spawnError = err instanceof Error ? err.message : String(err);
       finish(undefined);
@@ -184,13 +180,19 @@ export async function runShellCommand(
       // unless we are already escalating a timeout/cancel kill; destroying
       // stdio would resolve the step before SIGKILL reaches the grandchild.
       closeTimer = setTimeout(() => {
-        if ((timedOut || cancelled) && killTimer) return;
+        if (timedOut || cancelled) return;
         child.stdout?.destroy();
         child.stderr?.destroy();
         finish(code ?? undefined);
       }, 250);
       closeTimer.unref();
     });
-    child.on("close", (code) => finish(code ?? undefined));
+    child.on("close", (code) => {
+      if (timedOut || cancelled) {
+        void finishAfterTreeExit(code ?? undefined);
+        return;
+      }
+      finish(code ?? undefined);
+    });
   });
 }

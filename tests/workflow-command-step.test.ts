@@ -707,7 +707,38 @@ describe("runShellCommand", () => {
     expect(Date.now() - started).toBeLessThan(4000);
     const pid = Number((await readFile(pidFile, "utf8")).trim());
     expect(pid).toBeGreaterThan(0);
-    await new Promise((r) => setTimeout(r, 600));
+    let alive = true;
+    try {
+      process.kill(pid, 0);
+    } catch (err) {
+      alive = (err as NodeJS.ErrnoException).code !== "ESRCH";
+    }
+    expect(alive).toBe(false);
+  });
+
+  it("does not resolve a cancelled command while a redirected SIGTERM-immune grandchild is alive", async () => {
+    if (process.platform === "win32") return;
+    const cwd = await tempDir();
+    const pidFile = join(cwd, "bg.pid");
+    const controller = new AbortController();
+    const pending = runShellCommand(
+      `(node -e 'process.on("SIGTERM",()=>{}); require("fs").writeFileSync(process.argv[1], String(process.pid)); setInterval(()=>{},1000)' "${pidFile}" >/dev/null 2>&1 &); sleep 30`,
+      { cwd, signal: controller.signal, killGraceMs: 400 },
+    );
+    const started = Date.now();
+    while (Date.now() - started < 3000) {
+      try {
+        if ((await readFile(pidFile, "utf8")).trim().length > 0) break;
+      } catch {
+        // not written yet
+      }
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    controller.abort();
+    const result = await pending;
+    expect(result.cancelled).toBe(true);
+    const pid = Number((await readFile(pidFile, "utf8")).trim());
+    expect(pid).toBeGreaterThan(0);
     let alive = true;
     try {
       process.kill(pid, 0);
