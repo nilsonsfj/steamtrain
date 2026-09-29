@@ -265,14 +265,23 @@ function referencedStepId(ref: string): string | undefined {
   return undefined;
 }
 
-/** Ids of the steps a template reads, in order of first use. */
-export function templateStepIds(text: string): string[] {
-  const ids = new Set<string>();
+/** A step result field that says how the step ended, rather than what it made. */
+const STEP_STATUS_FIELD = /^steps\.(.+)\.(ok|error|exitCode)$/;
+
+/**
+ * The steps a template reads, in order of first use, each with whether it
+ * reads only how the step ended (`ok`, `error`, `exitCode`) or also what it
+ * made (its output, items, json, …).
+ */
+export function templateStepReads(text: string): Map<string, "status" | "content"> {
+  const reads = new Map<string, "status" | "content">();
   for (const ref of extractRefs(text)) {
     const id = referencedStepId(ref);
-    if (id !== undefined) ids.add(id);
+    if (id === undefined) continue;
+    if (!STEP_STATUS_FIELD.test(ref)) reads.set(id, "content");
+    else if (!reads.has(id)) reads.set(id, "status");
   }
-  return [...ids];
+  return reads;
 }
 
 /** Scan condition text fields for template refs. `condition.step` is intentionally skipped — it's a plain step id, not a template string. */

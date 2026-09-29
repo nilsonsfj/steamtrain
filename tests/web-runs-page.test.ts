@@ -712,12 +712,23 @@ describe("runs page: the full receipt", () => {
           {
             key: "report",
             written: true,
+            description: "The report",
             path: "/work/app/.steamtrain/outputs/bug-hunt/2026-09-27_10-47-12/report.md",
           },
           { key: "log", written: false, error: "step 'check' failed" },
         ],
       },
     });
+    // A saved row and a row that was not saved are styled apart, and only the
+    // saved one offers its path on hover.
+    const saved = collect(page.root, (n) => hasClass(n, "saved"));
+    const notSaved = collect(page.root, (n) => hasClass(n, "not-saved"));
+    expect(saved).toHaveLength(1);
+    expect(notSaved).toHaveLength(1);
+    expect(saved[0]?.getAttribute("title")).toBe(
+      "/work/app/.steamtrain/outputs/bug-hunt/2026-09-27_10-47-12/report.md — The report",
+    );
+    expect(notSaved[0]?.getAttribute("title")).toBeFalsy();
     const main = page.main();
     expect(main).toContain("Outputs");
     expect(main).toContain(

@@ -1318,7 +1318,7 @@
         outputsBody.appendChild(h("div", {
           class: o.written ? "saved" : "not-saved",
           text: outputLines[i],
-          title: o.path || ""
+          title: [o.written ? o.path : "", o.description].filter(Boolean).join(" — ")
         }));
       });
       holder.appendChild(h("div", { class: "hist-input-block" },

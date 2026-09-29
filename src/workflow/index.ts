@@ -309,7 +309,7 @@ export {
 } from "./timeout";
 export { BUNDLED_WORKFLOWS } from "./bundled";
 export { renderPrompt, renderCmd, lintTemplateRefs, type TemplateContext } from "./template";
-export { WORKFLOW_OUTPUTS_DIR, runTimestamp, writeWorkflowOutputs } from "./outputs";
+export { writeWorkflowOutputs } from "./outputs";
 export {
   SHARE_FORMAT_VERSION,
   SHARE_FILE_SUFFIX,

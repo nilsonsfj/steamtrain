@@ -944,7 +944,8 @@
         h("div", { class: "sev" + (o.written ? "" : " medium"), text: o.written ? "FILE" : "not saved" }),
         h("div", { class: "what", text: lines[i] })
       );
-      if (o.written && o.path) row.title = o.path;
+      var tip = [o.written ? o.path : "", o.description].filter(Boolean).join(" — ");
+      if (tip) row.setAttribute("title", tip);
       box.appendChild(row);
     });
     return box;

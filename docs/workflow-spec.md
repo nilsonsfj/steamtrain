@@ -240,7 +240,7 @@ and web UI show the path when the run ends.
 | field | required | meaning |
 | --- | --- | --- |
 | `value` | yes | Template rendered when the run ends, usually one step's output: `"{{steps.report.output}}"`. Same placeholders as a prompt, except `{{item}}` and `{{iteration}}`. |
-| `description` | no | Help text shown in UIs. |
+| `description` | no | What the output is; shown with its path when you hover it in the web UI. |
 | `path` | no | Where the file goes, relative to the directory the run started in. May use `{{workflow}}`, `{{run.timestamp}}` (the run's local start time, `2026-09-27_10-47-12`) and declared `{{inputs.<key>}}`. Default: `.steamtrain/outputs/<workflow>/<run.timestamp>/<key>.md`. |
 
 ```jsonc
@@ -262,7 +262,9 @@ and web UI show the path when the run ends.
 
 - **When it is written.** An output is written only when every step its
   `value` reads finished ok. Otherwise it is recorded as not saved, with the
-  step that stopped it (`step 'report' failed`). A canceled run writes none
+  step that stopped it (`step 'report' failed`). A step read only for how it
+  ended (`{{steps.check.ok}}`, `.error`, `.exitCode`) just has to have run,
+  so an output can write down a failure: `"value": "check failed: {{steps.check.error}}"`. A canceled run writes none
   (it may be resuming elsewhere), and a sub-workflow's run writes none: only
   the run a person started does.
 - **Read-only runs still save.** The engine writes the file after the steps

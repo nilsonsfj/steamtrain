@@ -685,9 +685,10 @@ describe("finished-run page: saved outputs", () => {
           {
             key: "report",
             written: true,
+            description: "The report",
             path: "/work/app/.steamtrain/outputs/ship-it/2026-09-27_10-47-12/report.md",
           },
-          { key: "log", written: false, error: "step 'check' failed" },
+          { key: "log", written: false, description: "The log", error: "step 'check' failed" },
         ],
         ts: at(),
       },
@@ -699,6 +700,13 @@ describe("finished-run page: saved outputs", () => {
       "saved report → .steamtrain/outputs/ship-it/2026-09-27_10-47-12/report.md",
     );
     expect(saved && shownText(saved)).toContain("not saved log: step 'check' failed");
+    // Hover: the path with the description, or the description alone for a
+    // file that was never written.
+    const rows = saved ? byClass(saved, "finding") : [];
+    expect(rows[0]?.getAttribute("title")).toBe(
+      "/work/app/.steamtrain/outputs/ship-it/2026-09-27_10-47-12/report.md — The report",
+    );
+    expect(rows[1]?.getAttribute("title")).toBe("The log");
   });
 
   it("shows no Saved box for a workflow that declares no outputs", () => {

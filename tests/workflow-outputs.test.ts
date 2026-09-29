@@ -197,6 +197,36 @@ describe("workflow outputs: a run writes them", () => {
     expect(outputs[1]).toMatchObject({ key: "report", written: true });
   });
 
+  it("writes an output that only reads how a failed step ended", async () => {
+    const events = await run(
+      reportSpec(
+        {
+          failure: { value: "check failed: {{steps.check.error}} ({{steps.check.ok}})" },
+          both: { value: "{{steps.check.ok}} {{steps.check.output}}" },
+        },
+        "exit 3",
+      ),
+    );
+    const [failure, both] = done(events).outputs ?? [];
+    expect(failure?.written).toBe(true);
+    expect(await readFile(failure?.path ?? "", "utf8")).toMatch(/^check failed: .*\(false\)\n$/);
+    // Reading what the step made still needs it to have succeeded.
+    expect(both).toMatchObject({ written: false, error: "step 'check' failed" });
+  });
+
+  it("still reports a step that never ran, even when only its status is read", async () => {
+    const [report] = await writeWorkflowOutputs(
+      { name: "hunt", outputs: { r: { value: "{{steps.gone.ok}}" } }, phases: [] },
+      {
+        cwd: dir,
+        startedAt: Date.now(),
+        context: { input: "x", outputs: new Map() },
+        results: new Map(),
+      },
+    );
+    expect(report).toMatchObject({ written: false, error: "step 'gone' did not run" });
+  });
+
   it("writes nothing for a canceled run", async () => {
     const ac = new AbortController();
     ac.abort();
@@ -455,6 +485,13 @@ describe("workflow outputs: where they show up", () => {
     expect(
       arrivalOutputLines([saved("/work/app/r.md"), saved("/work/app2/r.md")], "/work/app/"),
     ).toEqual(["saved report → r.md", "saved report → /work/app2/r.md"]);
+  });
+
+  it("carries an output's description through to its result", async () => {
+    const events = await run(
+      reportSpec({ report: { value: "{{steps.report.output}}", description: "The report" } }),
+    );
+    expect(done(events).outputs?.[0]?.description).toBe("The report");
   });
 
   it("says why an output was not saved", () => {
