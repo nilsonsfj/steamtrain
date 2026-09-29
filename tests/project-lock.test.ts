@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, stat, unlink, writeFile } from "node:fs/promises";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -233,6 +233,38 @@ describe("withFileLock bestEffort", () => {
     const tags = await Promise.all([run("a"), run("b"), run("c")]);
     expect(tags.sort()).toEqual(["a", "b", "c"]);
     expect(maxActive).toBe(1);
+  });
+
+  it("releases the lock after a held steal coordinator is freed", async () => {
+    const dir = await scratchDir();
+    const lockPath = join(dir, "x.lock");
+    const stealPath = `${lockPath}.steal`;
+    let releaseFn!: () => void;
+    const holdUntil = new Promise<void>((resolve) => {
+      releaseFn = resolve;
+    });
+    let markAcquired!: () => void;
+    const acquired = new Promise<void>((resolve) => {
+      markAcquired = resolve;
+    });
+    const held = withFileLock(
+      lockPath,
+      async () => {
+        markAcquired();
+        await holdUntil;
+      },
+      { maxWaitMs: 5_000, pollMs: 5, label: "test lock" },
+    );
+    await acquired;
+    await writeFile(
+      stealPath,
+      JSON.stringify({ pid: process.pid, host: hostname(), createdAtMs: Date.now() }),
+    );
+    releaseFn();
+    await new Promise((r) => setTimeout(r, 80));
+    await unlink(stealPath);
+    await held;
+    await expect(stat(lockPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("serializes acquire when an abandoned steal coordinator is present", async () => {

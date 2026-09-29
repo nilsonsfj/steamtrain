@@ -56,6 +56,9 @@ const DEFAULT_STALE_MS = 15 * 60_000;
 const DEFAULT_POLL_MS = 750;
 /** A steal-coordinator file older than this is assumed abandoned. */
 const STEAL_LOCK_STALE_MS = 10_000;
+/** 5ms poll × attempts. Acquire/steal can fail fast; release must not. */
+const STEAL_LOCK_ACQUIRE_ATTEMPTS = 8;
+const STEAL_LOCK_RELEASE_ATTEMPTS = 2_000;
 
 /**
  * Run `fn` while holding an exclusive lock at `lockPath`. See
@@ -165,9 +168,13 @@ async function isLockStealable(lockPath: string, staleMs: number, nowMs: number)
   return deadSameHost || nowMs - mtimeMs > staleMs;
 }
 
-async function withStealLock<T>(lockPath: string, fn: () => Promise<T>): Promise<T | undefined> {
+async function withStealLock<T>(
+  lockPath: string,
+  fn: () => Promise<T>,
+  attempts = STEAL_LOCK_ACQUIRE_ATTEMPTS,
+): Promise<T | undefined> {
   const stealPath = `${lockPath}.steal`;
-  for (let attempt = 0; attempt < 8; attempt++) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
     if (await tryAcquireStealLock(stealPath)) {
       try {
         return await fn();
@@ -264,12 +271,26 @@ async function unlinkAbandonedClaim(claimPath: string): Promise<void> {
 }
 
 async function releaseIfOwned(lockPath: string): Promise<void> {
-  await withStealLock(lockPath, async () => {
-    const holder = await readHolder(lockPath);
-    if (holder && holder.pid === process.pid && holder.host === hostname()) {
-      await removeQuietly(lockPath);
-    }
-  });
+  const released = await withStealLock(
+    lockPath,
+    async () => {
+      await removeIfOwned(lockPath);
+      return true;
+    },
+    STEAL_LOCK_RELEASE_ATTEMPTS,
+  );
+  if (released === true) return;
+  // Coordinator stayed busy past the steal-stale window. Still drop our
+  // lock so waiters are not stuck on a live pid until the 15-minute stale
+  // timeout (or the 10-minute acquire limit).
+  await removeIfOwned(lockPath);
+}
+
+async function removeIfOwned(lockPath: string): Promise<void> {
+  const holder = await readHolder(lockPath);
+  if (holder && holder.pid === process.pid && holder.host === hostname()) {
+    await removeQuietly(lockPath);
+  }
 }
 
 async function readHolder(lockPath: string): Promise<LockPayload | undefined> {
