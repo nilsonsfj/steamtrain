@@ -164,6 +164,21 @@ describe("shellQuote / renderCmd", () => {
     expect(out).toBe("END\nprintf INJECTED\n");
   });
 
+  it("preserves dollar signs, backticks, and backslashes in unquoted here-documents", () => {
+    if (process.platform === "win32") return;
+    const run = (input: string): string => {
+      const cmd = renderCmd(
+        "cat <<END\n{{input}}\nEND",
+        { input, outputs: new Map() },
+        { platform: "linux" },
+      );
+      return execFileSync("sh", ["-c", cmd], { encoding: "utf8" });
+    };
+    expect(run("price $5")).toBe("price $5\n");
+    expect(run("a`b")).toBe("a`b\n");
+    expect(run("a\\b")).toBe("a\\b\n");
+  });
+
   it("keeps unquoted here-document expansions on other body lines", () => {
     if (process.platform === "win32") return;
     const cmd = renderCmd(

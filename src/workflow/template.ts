@@ -519,7 +519,7 @@ function insertHeredocValue(
   const next = valueClosesHeredoc(rendered, closer, doc.stripTabs)
     ? rewriteHeredocOpener(doc, all, out, rendered)
     : out;
-  return next + (doc.quoted ? value : value.replace(/[\\$`]/g, "\\$1"));
+  return next + (doc.quoted ? value : value.replace(/[\\$`]/g, (ch) => `\\${ch}`));
 }
 
 function valueClosesHeredoc(value: string, delimiter: string, stripTabs: boolean): boolean {
