@@ -97,6 +97,18 @@ describe("shellQuote / renderCmd", () => {
     expect(out).toBe("x; printf INJECTED");
   });
 
+  it("does not treat ${#parameter} as starting a shell comment", () => {
+    if (process.platform === "win32") return;
+    const cmd = renderCmd(
+      'printf %s ${#} "{{input}}"',
+      { input: 'x"; printf INJECTED; echo "', outputs: new Map() },
+      { platform: "linux" },
+    );
+    expect(cmd).toBe('printf %s ${#} "x\\"; printf INJECTED; echo \\""');
+    const out = execFileSync("sh", ["-c", cmd], { encoding: "utf8" });
+    expect(out).toBe('0x"; printf INJECTED; echo "');
+  });
+
   it("does not let a here-document body close early via interpolated input", () => {
     if (process.platform === "win32") return;
     const cmd = renderCmd(

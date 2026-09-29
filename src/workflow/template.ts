@@ -407,7 +407,8 @@ function matchPlaceholder(template: string, i: number): RegExpMatchArray | null 
 /** `#` starts a comment when it begins a word (POSIX token recognition). */
 function isCommentStart(out: string): boolean {
   if (out.length === 0) return true;
-  return /[\s;|&(){}]/.test(out[out.length - 1]!);
+  // `{` / `}` are not word breaks: `${#param}` is length, not a comment.
+  return /[\s;|&()]/.test(out[out.length - 1]!);
 }
 
 function atHeredocClose(template: string, i: number, doc: PendingHeredoc): boolean {
