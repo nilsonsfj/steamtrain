@@ -207,9 +207,10 @@ export function renderCmd(
  * (so `\"` does not open a string). `$(...)` and backticks push a nested
  * unquoted frame, because the shell parses a new quoting context inside them.
  * Unquoted `#` at a word break starts a comment through the next newline.
- * `<<` / `<<-` here-documents collect a body where quotes are literal; a
- * placeholder there rewrites the delimiter to a unique quoted word so the
- * value cannot close the document or expand.
+ * `<<` / `<<-` here-documents collect a body where quotes are literal. A
+ * placeholder there is inserted with the original delimiter's expansion
+ * rules (escaped in an unquoted document, raw in a quoted one). The
+ * delimiter is rewritten only when the value would close the document.
  */
 interface PosixFrame {
   quote: ShellQuoteContext;
@@ -221,6 +222,8 @@ interface PosixFrame {
 interface PendingHeredoc {
   delimiter: string;
   stripTabs: boolean;
+  /** True when the original delimiter was quoted (`<<'END'`, `<<"END"`, `<<\END`). */
+  quoted: boolean;
   delimOutStart: number;
   delimOutEnd: number;
   closer?: string;
@@ -239,10 +242,8 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
   let comment = false;
   let heredoc: PendingHeredoc | undefined;
   let atLineStart = true;
-
-  const interpolate = (raw: string | undefined, match: string, quote: ShellQuoteContext): void => {
-    out += raw === undefined ? match : shellQuoteInContext(redactSecrets(raw), quote, platform);
-  };
+  /** True when the previous unquoted character was escaped (`foo\ #` is one word). */
+  let prevEscaped = false;
 
   while (i < template.length) {
     if (heredoc) {
@@ -262,8 +263,7 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
         if (value === undefined) {
           out += ph[0];
         } else {
-          out = rewriteHeredocOpener(heredoc, allHeredocs, out);
-          out += redactSecrets(value);
+          out = insertHeredocValue(heredoc, allHeredocs, out, redactSecrets(value));
         }
         i += ph[0].length;
         atLineStart = false;
@@ -280,9 +280,17 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
     const ph = matchPlaceholder(template, i);
     if (ph) {
       const value = resolveTemplateValue(ph[1]!.trim(), ctx);
-      interpolate(value, ph[0], comment ? null : frame.quote);
+      if (value === undefined) {
+        out += ph[0];
+      } else if (comment) {
+        // A newline would end the comment and execute the rest of the value.
+        out += shellQuoteInContext(redactSecrets(value).replace(/[\r\n]/g, " "), null, platform);
+      } else {
+        out += shellQuoteInContext(redactSecrets(value), frame.quote, platform);
+      }
       i += ph[0].length;
       atLineStart = false;
+      prevEscaped = false;
       continue;
     }
 
@@ -292,6 +300,7 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
     if (comment) {
       out += ch;
       i += 1;
+      prevEscaped = false;
       if (ch === "\n") {
         comment = false;
         atLineStart = true;
@@ -307,13 +316,20 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
       out += ch;
       i += 1;
       atLineStart = ch === "\n";
+      prevEscaped = false;
       continue;
     }
 
     if (ch === "\\" && i + 1 < template.length) {
+      if (frame.quote === null && (nxt === "\n" || nxt === "\r")) {
+        i += nxt === "\r" && template[i + 2] === "\n" ? 3 : 2;
+        atLineStart = false;
+        continue;
+      }
       out += ch + nxt;
       i += 2;
-      atLineStart = nxt === "\n";
+      prevEscaped = frame.quote === null;
+      atLineStart = false;
       continue;
     }
 
@@ -323,6 +339,7 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
         out += ch;
         i += 1;
         atLineStart = false;
+        prevEscaped = false;
         continue;
       }
     } else if (ch === "'" || ch === '"') {
@@ -330,14 +347,16 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
       out += ch;
       i += 1;
       atLineStart = false;
+      prevEscaped = false;
       continue;
     }
 
-    if (frame.quote === null && ch === "#" && isCommentStart(out)) {
+    if (frame.quote === null && ch === "#" && !prevEscaped && isCommentStart(out)) {
       comment = true;
       out += ch;
       i += 1;
       atLineStart = false;
+      prevEscaped = false;
       continue;
     }
 
@@ -346,6 +365,7 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
       i += 2;
       stack.push(newFrame("cmdsub"));
       atLineStart = false;
+      prevEscaped = false;
       continue;
     }
 
@@ -353,6 +373,7 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
       out += ch;
       i += 1;
       atLineStart = false;
+      prevEscaped = false;
       if (frame.kind === "backtick" && frame.quote === null) stack.pop();
       else stack.push(newFrame("backtick"));
       continue;
@@ -363,6 +384,7 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
       out += parsed.emitted;
       i = parsed.nextI;
       atLineStart = false;
+      prevEscaped = false;
       if (parsed.doc) {
         frame.pendingHeredocs.push(parsed.doc);
         allHeredocs.push(parsed.doc);
@@ -376,6 +398,7 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
         out += ch;
         i += 1;
         atLineStart = false;
+        prevEscaped = false;
         continue;
       }
       if (ch === ")") {
@@ -384,12 +407,14 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
         out += ch;
         i += 1;
         atLineStart = false;
+        prevEscaped = false;
         continue;
       }
     }
 
     out += ch;
     i += 1;
+    prevEscaped = false;
     if (ch === "\n") {
       atLineStart = true;
       heredoc = frame.pendingHeredocs.shift();
@@ -435,7 +460,9 @@ function consumeHeredocOpener(
   while (template[pos] === " " || template[pos] === "\t") pos += 1;
   const delimStart = pos;
   let delimiter = "";
+  let quoted = false;
   if (template[pos] === "'" || template[pos] === '"') {
+    quoted = true;
     const q = template[pos]!;
     pos += 1;
     while (pos < template.length && template[pos] !== q && template[pos] !== "\n") {
@@ -446,6 +473,7 @@ function consumeHeredocOpener(
   } else {
     while (pos < template.length && template[pos] !== "\n" && !/[\s;|&()<>]/.test(template[pos]!)) {
       if (template[pos] === "\\") {
+        quoted = true;
         pos += 1;
         if (pos < template.length) {
           delimiter += template[pos];
@@ -466,16 +494,45 @@ function consumeHeredocOpener(
     doc: {
       delimiter,
       stripTabs,
+      quoted,
       delimOutStart: outLen + prefixLen,
       delimOutEnd: outLen + emitted.length,
     },
   };
 }
 
-function rewriteHeredocOpener(doc: PendingHeredoc, all: PendingHeredoc[], out: string): string {
-  if (doc.closer !== undefined) return out;
-  const unique = `STEAMTRAIN_EOF_${randomBytes(16).toString("hex")}`;
-  const replacement = `'${unique}'`;
+function insertHeredocValue(
+  doc: PendingHeredoc,
+  all: PendingHeredoc[],
+  out: string,
+  value: string,
+): string {
+  const closer = doc.closer ?? doc.delimiter;
+  const prefix = valueClosesHeredoc(value, closer, doc.stripTabs)
+    ? rewriteHeredocOpener(doc, all, out, value)
+    : out;
+  return prefix + (doc.quoted ? value : value.replace(/[\\$`]/g, "\\$1"));
+}
+
+function valueClosesHeredoc(value: string, delimiter: string, stripTabs: boolean): boolean {
+  for (const line of value.split(/\r?\n/)) {
+    const candidate = stripTabs ? line.replace(/^\t+/, "") : line;
+    if (candidate === delimiter) return true;
+  }
+  return false;
+}
+
+function rewriteHeredocOpener(
+  doc: PendingHeredoc,
+  all: PendingHeredoc[],
+  out: string,
+  value: string,
+): string {
+  let unique = `STEAMTRAIN_EOF_${randomBytes(16).toString("hex")}`;
+  while (valueClosesHeredoc(value, unique, doc.stripTabs)) {
+    unique = `STEAMTRAIN_EOF_${randomBytes(16).toString("hex")}`;
+  }
+  const replacement = doc.quoted ? `'${unique}'` : unique;
   const origEnd = doc.delimOutEnd;
   const delta = replacement.length - (origEnd - doc.delimOutStart);
   const next = out.slice(0, doc.delimOutStart) + replacement + out.slice(origEnd);

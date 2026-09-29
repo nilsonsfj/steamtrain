@@ -97,6 +97,28 @@ describe("shellQuote / renderCmd", () => {
     expect(out).toBe("x; printf INJECTED");
   });
 
+  it("does not execute later lines of a multiline value interpolated in a comment", () => {
+    if (process.platform === "win32") return;
+    const cmd = renderCmd(
+      "# {{input}}\nprintf SAFE",
+      { input: "x\nprintf INJECTED\n#", outputs: new Map() },
+      { platform: "linux" },
+    );
+    const out = execFileSync("sh", ["-c", cmd], { encoding: "utf8" });
+    expect(out).toBe("SAFE");
+  });
+
+  it("does not treat an escaped space before # as starting a comment", () => {
+    if (process.platform === "win32") return;
+    const cmd = renderCmd(
+      "printf %s foo\\ # ' text\n'; printf %s {{input}}",
+      { input: "x; printf INJECTED", outputs: new Map() },
+      { platform: "linux" },
+    );
+    const out = execFileSync("sh", ["-c", cmd], { encoding: "utf8" });
+    expect(out).toBe("foo # text\nx; printf INJECTED");
+  });
+
   it("does not treat ${#parameter} as starting a shell comment", () => {
     if (process.platform === "win32") return;
     const cmd = renderCmd(
@@ -118,6 +140,20 @@ describe("shellQuote / renderCmd", () => {
     );
     const out = execFileSync("sh", ["-c", cmd], { encoding: "utf8" });
     expect(out).toBe("x\nEND\nprintf INJECTED\n#\n");
+  });
+
+  it("keeps unquoted here-document expansions on other body lines", () => {
+    if (process.platform === "win32") return;
+    const cmd = renderCmd(
+      "cat <<END\n$HOME\n{{input}}\nEND",
+      { input: "hello", outputs: new Map() },
+      { platform: "linux" },
+    );
+    const out = execFileSync("sh", ["-c", cmd], {
+      encoding: "utf8",
+      env: { ...process.env, HOME: "/tmp/st-home" },
+    });
+    expect(out).toBe("/tmp/st-home\nhello\n");
   });
 });
 
