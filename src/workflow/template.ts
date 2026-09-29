@@ -21,6 +21,7 @@
  * unless `allowShellTemplates` is set on the step (raw Makefile-style mode).
  */
 
+import { randomBytes } from "node:crypto";
 import { redactSecrets } from "../util/redact";
 import { type ShellQuoteContext, shellQuoteInContext } from "../util/shell-quote";
 import { jsonFieldText, jsonPathGet } from "./structured";
@@ -205,74 +206,176 @@ export function renderCmd(
  * POSIX quote / substitution tracker. Unquoted `\` escapes the next character
  * (so `\"` does not open a string). `$(...)` and backticks push a nested
  * unquoted frame, because the shell parses a new quoting context inside them.
+ * Unquoted `#` at a word break starts a comment through the next newline.
+ * `<<` / `<<-` here-documents collect a body where quotes are literal; a
+ * placeholder there rewrites the delimiter to a unique quoted word so the
+ * value cannot close the document or expand.
  */
 interface PosixFrame {
   quote: ShellQuoteContext;
   extraParens: number;
   kind: "root" | "cmdsub" | "backtick";
+  pendingHeredocs: PendingHeredoc[];
+}
+
+interface PendingHeredoc {
+  delimiter: string;
+  stripTabs: boolean;
+  delimOutStart: number;
+  delimOutEnd: number;
+  closer?: string;
+}
+
+function newFrame(kind: PosixFrame["kind"]): PosixFrame {
+  return { quote: null, extraParens: 0, kind, pendingHeredocs: [] };
 }
 
 function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS.Platform): string {
-  const stack: PosixFrame[] = [{ quote: null, extraParens: 0, kind: "root" }];
+  const stack: PosixFrame[] = [newFrame("root")];
+  const allHeredocs: PendingHeredoc[] = [];
   const top = (): PosixFrame => stack[stack.length - 1]!;
   let out = "";
   let i = 0;
+  let comment = false;
+  let heredoc: PendingHeredoc | undefined;
+  let atLineStart = true;
+
+  const interpolate = (raw: string | undefined, match: string, quote: ShellQuoteContext): void => {
+    out += raw === undefined ? match : shellQuoteInContext(redactSecrets(raw), quote, platform);
+  };
+
   while (i < template.length) {
-    const frame = top();
-    const ph = template.slice(i).match(/^\{\{\s*([^{}]+?)\s*\}\}/);
-    if (ph) {
-      const value = resolveTemplateValue(ph[1]!.trim(), ctx);
-      out +=
-        value === undefined
-          ? ph[0]
-          : shellQuoteInContext(redactSecrets(value), frame.quote, platform);
-      i += ph[0].length;
+    if (heredoc) {
+      if (atLineStart && atHeredocClose(template, i, heredoc)) {
+        if (heredoc.stripTabs) {
+          while (template[i] === "\t") i += 1;
+        }
+        i += heredoc.delimiter.length;
+        out += heredoc.closer ?? heredoc.delimiter;
+        heredoc = top().pendingHeredocs.shift();
+        atLineStart = false;
+        continue;
+      }
+      const ph = matchPlaceholder(template, i);
+      if (ph) {
+        const value = resolveTemplateValue(ph[1]!.trim(), ctx);
+        if (value === undefined) {
+          out += ph[0];
+        } else {
+          out = rewriteHeredocOpener(heredoc, allHeredocs, out);
+          out += redactSecrets(value);
+        }
+        i += ph[0].length;
+        atLineStart = false;
+        continue;
+      }
+      const ch = template[i]!;
+      out += ch;
+      i += 1;
+      atLineStart = ch === "\n";
       continue;
     }
+
+    const frame = top();
+    const ph = matchPlaceholder(template, i);
+    if (ph) {
+      const value = resolveTemplateValue(ph[1]!.trim(), ctx);
+      interpolate(value, ph[0], comment ? null : frame.quote);
+      i += ph[0].length;
+      atLineStart = false;
+      continue;
+    }
+
     const ch = template[i]!;
     const nxt = template[i + 1];
+
+    if (comment) {
+      out += ch;
+      i += 1;
+      if (ch === "\n") {
+        comment = false;
+        atLineStart = true;
+        heredoc = frame.pendingHeredocs.shift();
+      } else {
+        atLineStart = false;
+      }
+      continue;
+    }
+
     if (frame.quote === "'") {
       if (ch === "'") frame.quote = null;
       out += ch;
       i += 1;
+      atLineStart = ch === "\n";
       continue;
     }
+
     if (ch === "\\" && i + 1 < template.length) {
       out += ch + nxt;
       i += 2;
+      atLineStart = nxt === "\n";
       continue;
     }
+
     if (frame.quote === '"') {
       if (ch === '"') {
         frame.quote = null;
         out += ch;
         i += 1;
+        atLineStart = false;
         continue;
       }
     } else if (ch === "'" || ch === '"') {
       frame.quote = ch;
       out += ch;
       i += 1;
+      atLineStart = false;
       continue;
     }
+
+    if (frame.quote === null && ch === "#" && isCommentStart(out)) {
+      comment = true;
+      out += ch;
+      i += 1;
+      atLineStart = false;
+      continue;
+    }
+
     if (ch === "$" && nxt === "(") {
       out += "$(";
       i += 2;
-      stack.push({ quote: null, extraParens: 0, kind: "cmdsub" });
+      stack.push(newFrame("cmdsub"));
+      atLineStart = false;
       continue;
     }
+
     if (ch === "`") {
       out += ch;
       i += 1;
+      atLineStart = false;
       if (frame.kind === "backtick" && frame.quote === null) stack.pop();
-      else stack.push({ quote: null, extraParens: 0, kind: "backtick" });
+      else stack.push(newFrame("backtick"));
       continue;
     }
+
+    if (frame.quote === null && ch === "<" && nxt === "<" && template[i + 2] !== "<") {
+      const parsed = consumeHeredocOpener(template, i, out.length);
+      out += parsed.emitted;
+      i = parsed.nextI;
+      atLineStart = false;
+      if (parsed.doc) {
+        frame.pendingHeredocs.push(parsed.doc);
+        allHeredocs.push(parsed.doc);
+      }
+      continue;
+    }
+
     if (frame.kind === "cmdsub" && frame.quote === null) {
       if (ch === "(") {
         frame.extraParens += 1;
         out += ch;
         i += 1;
+        atLineStart = false;
         continue;
       }
       if (ch === ")") {
@@ -280,13 +383,111 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
         else stack.pop();
         out += ch;
         i += 1;
+        atLineStart = false;
         continue;
       }
     }
+
     out += ch;
     i += 1;
+    if (ch === "\n") {
+      atLineStart = true;
+      heredoc = frame.pendingHeredocs.shift();
+    } else {
+      atLineStart = false;
+    }
   }
   return out;
+}
+
+function matchPlaceholder(template: string, i: number): RegExpMatchArray | null {
+  return template.slice(i).match(/^\{\{\s*([^{}]+?)\s*\}\}/);
+}
+
+/** `#` starts a comment when it begins a word (POSIX token recognition). */
+function isCommentStart(out: string): boolean {
+  if (out.length === 0) return true;
+  return /[\s;|&(){}]/.test(out[out.length - 1]!);
+}
+
+function atHeredocClose(template: string, i: number, doc: PendingHeredoc): boolean {
+  let j = i;
+  if (doc.stripTabs) {
+    while (template[j] === "\t") j += 1;
+  }
+  if (!template.startsWith(doc.delimiter, j)) return false;
+  const after = template[j + doc.delimiter.length];
+  return after === undefined || after === "\n" || after === "\r";
+}
+
+function consumeHeredocOpener(
+  template: string,
+  start: number,
+  outLen: number,
+): { nextI: number; emitted: string; doc?: PendingHeredoc } {
+  let pos = start + 2; // skip <<
+  let stripTabs = false;
+  if (template[pos] === "-") {
+    stripTabs = true;
+    pos += 1;
+  }
+  while (template[pos] === " " || template[pos] === "\t") pos += 1;
+  const delimStart = pos;
+  let delimiter = "";
+  if (template[pos] === "'" || template[pos] === '"') {
+    const q = template[pos]!;
+    pos += 1;
+    while (pos < template.length && template[pos] !== q && template[pos] !== "\n") {
+      delimiter += template[pos];
+      pos += 1;
+    }
+    if (template[pos] === q) pos += 1;
+  } else {
+    while (pos < template.length && template[pos] !== "\n" && !/[\s;|&()<>]/.test(template[pos]!)) {
+      if (template[pos] === "\\") {
+        pos += 1;
+        if (pos < template.length) {
+          delimiter += template[pos];
+          pos += 1;
+        }
+      } else {
+        delimiter += template[pos];
+        pos += 1;
+      }
+    }
+  }
+  const emitted = template.slice(start, pos);
+  if (!delimiter) return { nextI: pos, emitted };
+  const prefixLen = delimStart - start;
+  return {
+    nextI: pos,
+    emitted,
+    doc: {
+      delimiter,
+      stripTabs,
+      delimOutStart: outLen + prefixLen,
+      delimOutEnd: outLen + emitted.length,
+    },
+  };
+}
+
+function rewriteHeredocOpener(doc: PendingHeredoc, all: PendingHeredoc[], out: string): string {
+  if (doc.closer !== undefined) return out;
+  const unique = `STEAMTRAIN_EOF_${randomBytes(16).toString("hex")}`;
+  const replacement = `'${unique}'`;
+  const origEnd = doc.delimOutEnd;
+  const delta = replacement.length - (origEnd - doc.delimOutStart);
+  const next = out.slice(0, doc.delimOutStart) + replacement + out.slice(origEnd);
+  doc.delimOutEnd = doc.delimOutStart + replacement.length;
+  doc.closer = unique;
+  for (const other of all) {
+    if (other === doc) continue;
+    if (other.delimOutStart >= origEnd) {
+      other.delimOutStart += delta;
+      other.delimOutEnd += delta;
+    }
+  }
+  return next;
 }
 
 function renderCmdWindows(

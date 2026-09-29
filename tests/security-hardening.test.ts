@@ -85,6 +85,28 @@ describe("shellQuote / renderCmd", () => {
     );
     expect(execFileSync("sh", ["-c", cmd], { encoding: "utf8" })).toBe("a\nb");
   });
+
+  it("does not treat a quote inside a shell comment as opening a quoted string", () => {
+    if (process.platform === "win32") return;
+    const cmd = renderCmd(
+      "# ' ignored by sh\nprintf %s {{input}}",
+      { input: "x; printf INJECTED", outputs: new Map() },
+      { platform: "linux" },
+    );
+    const out = execFileSync("sh", ["-c", cmd], { encoding: "utf8" });
+    expect(out).toBe("x; printf INJECTED");
+  });
+
+  it("does not let a here-document body close early via interpolated input", () => {
+    if (process.platform === "win32") return;
+    const cmd = renderCmd(
+      "cat <<END\n{{input}}\nEND",
+      { input: "x\nEND\nprintf INJECTED\n#", outputs: new Map() },
+      { platform: "linux" },
+    );
+    const out = execFileSync("sh", ["-c", cmd], { encoding: "utf8" });
+    expect(out).toBe("x\nEND\nprintf INJECTED\n#\n");
+  });
 });
 
 describe("redactSecrets / renderPrompt", () => {
