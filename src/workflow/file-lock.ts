@@ -1,5 +1,4 @@
-import { randomBytes } from "node:crypto";
-import { mkdir, readFile, rename, stat, unlink, utimes, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, unlink, utimes, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { dirname } from "node:path";
 import { isPidAlive } from "../util/process-group";
@@ -16,8 +15,9 @@ import { abortableSleep } from "./timeout";
  * stealable. Every replacement of the lock file — exclusive create, stale
  * steal, and ownership-checked release — takes a sibling `.steal` coordinator
  * first, so a holder finishing cannot be unlinked out from under a waiter who
- * already wx-created a new lock. Abandoned coordinators are renamed off the
- * path and restored on inode mismatch.
+ * already wx-created a new lock. Abandoned coordinators are removed only
+ * after an exclusive per-inode claim, so a newly acquired coordinator is
+ * never moved or unlinked by a late reclaim.
  */
 
 export interface FileLockOptions {
@@ -204,34 +204,63 @@ async function tryAcquireStealLock(stealPath: string): Promise<boolean> {
 }
 
 async function reclaimAbandonedStealLock(stealPath: string): Promise<boolean> {
-  let info: { mtimeMs: number; ino: number };
+  let info: { mtimeMs: number; ino: number; dev: number };
   try {
     const s = await stat(stealPath);
-    info = { mtimeMs: s.mtimeMs, ino: s.ino };
+    info = { mtimeMs: s.mtimeMs, ino: s.ino, dev: s.dev };
   } catch {
     return false;
   }
   const holder = await readHolder(stealPath);
   const deadSameHost = Boolean(holder && holder.host === hostname() && !isPidAlive(holder.pid));
   if (!deadSameHost && Date.now() - info.mtimeMs <= STEAL_LOCK_STALE_MS) return false;
-  const stolen = `${stealPath}.${process.pid}.${randomBytes(6).toString("hex")}`;
-  try {
-    await rename(stealPath, stolen);
-  } catch {
+  const claimPath = `${stealPath}.claim.${info.dev}.${info.ino}`;
+  if (!(await tryWxPayload(claimPath))) {
+    await unlinkAbandonedClaim(claimPath);
     return false;
   }
   try {
-    const moved = await stat(stolen);
-    if (moved.ino !== info.ino) {
-      await rename(stolen, stealPath).catch(() => {});
-      return false;
+    let current: { ino: number; dev: number };
+    try {
+      const s = await stat(stealPath);
+      current = { ino: s.ino, dev: s.dev };
+    } catch (err) {
+      return isEnoent(err);
     }
-  } catch {
-    await rename(stolen, stealPath).catch(() => {});
-    return false;
+    if (current.ino !== info.ino || current.dev !== info.dev) return false;
+    await unlink(stealPath).catch(() => {});
+    return true;
+  } finally {
+    await unlink(claimPath).catch(() => {});
   }
-  await unlink(stolen).catch(() => {});
-  return true;
+}
+
+async function tryWxPayload(path: string): Promise<boolean> {
+  try {
+    const payload: LockPayload = {
+      pid: process.pid,
+      host: hostname(),
+      createdAtMs: Date.now(),
+    };
+    await writeFile(path, JSON.stringify(payload), { flag: "wx" });
+    return true;
+  } catch (err) {
+    if (isEnoent(err) || isEexist(err)) return false;
+    throw err;
+  }
+}
+
+async function unlinkAbandonedClaim(claimPath: string): Promise<void> {
+  let mtimeMs: number;
+  try {
+    mtimeMs = (await stat(claimPath)).mtimeMs;
+  } catch {
+    return;
+  }
+  const holder = await readHolder(claimPath);
+  const deadSameHost = Boolean(holder && holder.host === hostname() && !isPidAlive(holder.pid));
+  if (!deadSameHost && Date.now() - mtimeMs <= STEAL_LOCK_STALE_MS) return;
+  await unlink(claimPath).catch(() => {});
 }
 
 async function releaseIfOwned(lockPath: string): Promise<void> {
