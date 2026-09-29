@@ -1,7 +1,7 @@
-import { randomBytes } from "node:crypto";
-import { mkdir, readFile, rename, stat, unlink, utimes, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, unlink, utimes, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { dirname } from "node:path";
+import { isPidAlive } from "../util/process-group";
 import { isEnoent } from "./fs-util";
 import { abortableSleep } from "./timeout";
 
@@ -12,7 +12,9 @@ import { abortableSleep } from "./timeout";
  * Acquisition is exclusive-create (`wx`) of a JSON payload `{ pid, host,
  * createdAtMs }`. Holders refresh mtime so long critical sections are not
  * mistaken for abandoned locks; dead same-host PIDs and stale mtimes are
- * stealable. Release is ownership-checked so a contender that stole never
+ * stealable. Stealers serialize on a sibling `.steal` file, then re-check
+ * staleness before unlinking, so a waiter who already wx-created a new lock
+ * is not removed. Release is ownership-checked so a contender that stole never
  * deletes a newer holder's file.
  */
 
@@ -50,6 +52,8 @@ interface LockPayload {
 const DEFAULT_MAX_WAIT_MS = 10 * 60_000;
 const DEFAULT_STALE_MS = 15 * 60_000;
 const DEFAULT_POLL_MS = 750;
+/** A steal-coordinator file older than this is assumed abandoned. */
+const STEAL_LOCK_STALE_MS = 10_000;
 
 /**
  * Run `fn` while holding an exclusive lock at `lockPath`. See
@@ -132,39 +136,66 @@ async function tryAcquire(lockPath: string, nowMs: number): Promise<boolean> {
 }
 
 async function stealIfStale(lockPath: string, staleMs: number, nowMs: number): Promise<boolean> {
-  let info: { mtimeMs: number; ino: number } | undefined;
+  if (!(await isLockStealable(lockPath, staleMs, nowMs))) return false;
+
+  const stealPath = `${lockPath}.steal`;
+  if (!(await tryAcquireStealLock(stealPath))) return false;
   try {
-    const s = await stat(lockPath);
-    info = { mtimeMs: s.mtimeMs, ino: s.ino };
+    // Re-validate under the exclusive steal right. A sibling that already
+    // replaced the stale file with a live lock must not be unlinked.
+    if (!(await isLockStealable(lockPath, staleMs, nowMs))) return false;
+    await unlink(lockPath).catch(() => {});
+    return true;
+  } finally {
+    await unlink(stealPath).catch(() => {});
+  }
+}
+
+async function isLockStealable(lockPath: string, staleMs: number, nowMs: number): Promise<boolean> {
+  let mtimeMs: number;
+  try {
+    mtimeMs = (await stat(lockPath)).mtimeMs;
   } catch (err) {
     return isEnoent(err);
   }
-
   const holder = await readHolder(lockPath);
-  const deadSameHost = Boolean(holder && holder.host === hostname() && !isProcessAlive(holder.pid));
-  const staleMtime = nowMs - info.mtimeMs > staleMs;
-  if (!deadSameHost && !staleMtime) return false;
+  const deadSameHost = Boolean(holder && holder.host === hostname() && !isPidAlive(holder.pid));
+  return deadSameHost || nowMs - mtimeMs > staleMs;
+}
 
-  // Rename off the well-known path, then drop the stolen file. Two waiters
-  // cannot both rename the same inode; the loser gets ENOENT and a winner who
-  // already wx-created a new lock at `lockPath` is untouched.
-  const stolen = `${lockPath}.${process.pid}.${randomBytes(6).toString("hex")}`;
-  try {
-    await rename(lockPath, stolen);
-  } catch {
-    return false;
-  }
-  try {
-    const moved = await stat(stolen);
-    if (moved.ino !== info.ino) {
-      await unlink(stolen).catch(() => {});
+async function tryAcquireStealLock(stealPath: string): Promise<boolean> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const payload: LockPayload = {
+        pid: process.pid,
+        host: hostname(),
+        createdAtMs: Date.now(),
+      };
+      await writeFile(stealPath, JSON.stringify(payload), { flag: "wx" });
+      return true;
+    } catch (err) {
+      if (isEnoent(err)) {
+        await mkdir(dirname(stealPath), { recursive: true });
+        return false;
+      }
+      if (!isEexist(err)) throw err;
+      if (attempt === 0 && (await isStealLockAbandoned(stealPath))) {
+        await unlink(stealPath).catch(() => {});
+        continue;
+      }
       return false;
     }
-  } catch {
-    return false;
   }
-  await unlink(stolen).catch(() => {});
-  return true;
+  return false;
+}
+
+async function isStealLockAbandoned(stealPath: string): Promise<boolean> {
+  try {
+    const s = await stat(stealPath);
+    return Date.now() - s.mtimeMs > STEAL_LOCK_STALE_MS;
+  } catch {
+    return true;
+  }
 }
 
 async function releaseIfOwned(lockPath: string): Promise<void> {
@@ -185,16 +216,6 @@ async function readHolder(lockPath: string): Promise<LockPayload | undefined> {
     // Corrupt/empty/partial lock file — let staleness reclaim it.
   }
   return undefined;
-}
-
-function isProcessAlive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === "EPERM";
-  }
 }
 
 async function removeQuietly(lockPath: string): Promise<boolean> {

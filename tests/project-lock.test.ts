@@ -210,6 +210,31 @@ describe("withFileLock bestEffort", () => {
     expect(outcome).toEqual({ value: true, locked: true });
   });
 
+  it("serializes concurrent stealers of a dead lock", async () => {
+    const dir = await scratchDir();
+    const lockPath = join(dir, "x.lock");
+    await writeFile(lockPath, JSON.stringify({ pid: 2 ** 30, host: hostname(), createdAtMs: 0 }));
+    let active = 0;
+    let maxActive = 0;
+    const run = async (tag: string): Promise<string> =>
+      (
+        await withFileLock(
+          lockPath,
+          async () => {
+            active += 1;
+            maxActive = Math.max(maxActive, active);
+            await new Promise((r) => setTimeout(r, 30));
+            active -= 1;
+            return tag;
+          },
+          { maxWaitMs: 5_000, pollMs: 5, label: "test lock" },
+        )
+      ).value;
+    const tags = await Promise.all([run("a"), run("b"), run("c")]);
+    expect(tags.sort()).toEqual(["a", "b", "c"]);
+    expect(maxActive).toBe(1);
+  });
+
   it("runs unlocked when bestEffort and the holder never releases", async () => {
     const dir = await scratchDir();
     const lockPath = join(dir, "x.lock");
