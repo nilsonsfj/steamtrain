@@ -267,7 +267,20 @@ export interface WorkflowRunContext {
    * `deps.cwd`.
    */
   outputPaths?: Record<string, string>;
+  /**
+   * When the run started, if not just now: a run handed to a background
+   * process carries the start its first owner gave it, so its outputs land
+   * where its history record says.
+   */
+  startedAt?: number;
 }
+
+/**
+ * The reason a run's signal is aborted with when it is being handed to a
+ * detached runner rather than stopped. The runner finishes the run and writes
+ * its outputs; every other abort (a cancel, a timeout) writes what finished.
+ */
+export const RUN_HANDOFF_ABORT = "handoff";
 
 /**
  * Shared mutable state one run's schedulers and step executions operate on.
@@ -378,7 +391,7 @@ export async function* runWorkflow(
   deps: WorkflowDeps,
   signal?: AbortSignal,
 ): AsyncGenerator<WorkflowEvent> {
-  const startedAt = Date.now();
+  const startedAt = ctx.startedAt ?? Date.now();
   const valid = validateWorkflow(spec, deps.loopMaxIterations);
   if (!valid.ok) throw new Error(`invalid workflow '${spec.name}': ${valid.error}`);
 
@@ -487,9 +500,9 @@ export async function* runWorkflow(
 
 /**
  * Write the workflow's declared outputs as the run ends. A sub-workflow's run
- * writes none: its caller reads its steps. A canceled run writes none either,
- * since a cancel may be a hand-off to a detached runner that finishes the run
- * and writes them then.
+ * writes none: its caller reads its steps. A run handed to a detached runner
+ * writes none either: the runner finishes the run and writes them then. A
+ * canceled or timed-out run writes the outputs whose steps did finish.
  */
 async function runOutputs(
   env: RunEnv,
@@ -498,12 +511,12 @@ async function runOutputs(
   const { spec, ctx, deps, signal } = env;
   if (!spec.outputs || Object.keys(spec.outputs).length === 0) return undefined;
   if (ctx.workflowCallStack?.length) return undefined;
-  if (signal?.aborted) {
+  if (signal?.aborted && signal.reason === RUN_HANDOFF_ABORT) {
     return Object.entries(spec.outputs).map(([key, output]) => ({
       key,
       ...(output.description ? { description: output.description } : {}),
       written: false,
-      error: "the run was canceled",
+      error: "the run was handed to a background runner",
     }));
   }
   return writeWorkflowOutputs(spec, {

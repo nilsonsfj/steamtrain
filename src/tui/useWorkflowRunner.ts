@@ -16,6 +16,7 @@ import type {
 } from "../workflow";
 import { appendNarration, matchApprovalKey, matchPendingInput } from "../workflow";
 import {
+  RUN_HANDOFF_ABORT,
   RunRecordBuilder,
   WORKFLOW_CACHE_DIR,
   WORKFLOW_HISTORY_DIR,
@@ -917,7 +918,7 @@ export function useWorkflowRunner({
     // Stop the local engine immediately; its run loop performs the handoff and
     // re-attaches after abort cleanup. The commit latch above wins races with a
     // final workflow event or an abort-time exception.
-    ac.abort();
+    ac.abort(RUN_HANDOFF_ABORT);
     return null;
   }, [mountedRef]);
 

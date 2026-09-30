@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, rename, writeFile } from "node:fs/promises";
+import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 
 /**
@@ -79,6 +79,13 @@ export function isEnoent(err: unknown): boolean {
 export async function atomicWriteFile(target: string, contents: string): Promise<void> {
   await mkdir(dirname(target), { recursive: true });
   const temp = `${target}.${randomUUID()}.tmp`;
-  await writeFile(temp, contents, "utf8");
-  await rename(temp, target);
+  try {
+    await writeFile(temp, contents, "utf8");
+    await rename(temp, target);
+  } catch (error) {
+    // A target that cannot be replaced (a directory, say) must not leave the
+    // temp file to pile up beside it.
+    await rm(temp, { force: true }).catch(() => undefined);
+    throw error;
+  }
 }

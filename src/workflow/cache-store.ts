@@ -77,9 +77,15 @@ export function hashWorkflowCacheInput(input: string): string {
   return createHash("sha256").update(input).digest("hex");
 }
 
-/** Stable hash of the workflow definition so cache is invalidated when the spec changes. */
+/**
+ * Stable hash of the workflow definition so cache is invalidated when the spec
+ * changes. `outputs` are left out: they are rendered once every step has
+ * finished, so editing one cannot change what a step did, and must not throw
+ * away the steps' cached work (or downgrade a `--from` re-run) when it is.
+ */
 export function hashWorkflowSpec(spec: WorkflowSpec): string {
-  return createHash("sha256").update(stableStringify(spec)).digest("hex");
+  const { outputs: _outputs, ...steps } = spec;
+  return createHash("sha256").update(stableStringify(steps)).digest("hex");
 }
 
 export function workflowCacheFileName(key: WorkflowCacheKey): string {

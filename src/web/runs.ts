@@ -15,6 +15,7 @@ import {
   type PlanRerouteOptions,
   type PlanRerouteResult,
   type PlanRetryRetargetResult,
+  RUN_HANDOFF_ABORT,
   type RerunMode,
   type RerunPlan,
   type RetryRetargetOptions,
@@ -92,8 +93,8 @@ export interface WorkflowHost {
     approval?: ApprovalProvider,
     control?: WorkflowRunControl,
     humanInput?: HumanInputProvider,
-    /** Per-run cap on parallel steps ("Max parallel runners"); config default when omitted. */
-    maxConcurrency?: number,
+    /** Per-run knobs; `maxConcurrency` is the launch sheet's "Max parallel runners". */
+    options?: { maxConcurrency?: number },
   ): AsyncIterable<WorkflowEvent>;
 }
 
@@ -578,7 +579,7 @@ export class WorkflowRunManager {
     // Commit before aborting so a final event or abort-time exception cannot
     // race the run into its normal terminal path.
     run.handoffCommitted = true;
-    run.controller.abort();
+    run.controller.abort(RUN_HANDOFF_ABORT);
     return { ok: true };
   }
 
@@ -916,7 +917,7 @@ export class WorkflowRunManager {
         approval,
         run.control,
         humanInput,
-        opts.maxParallel,
+        { maxConcurrency: opts.maxParallel },
       )) {
         // Mid-run detach committed: stop recording, mirroring, and emitting
         // events — the detached child owns the run's record and stream from

@@ -52,6 +52,19 @@ export type DispatchCheck = { ok: true } | { ok: false; reason: string };
  * Routes workspace dispatches to the right adapter + model, gates on doctor
  * health, and streams normalized events for a run.
  */
+/** The knobs of {@link Orchestrator.runWorkflow} that only some callers set. */
+export interface RunWorkflowOptions {
+  /**
+   * Per-run override of the configured `maxConcurrency` (the launch sheet's
+   * "Max parallel runners"). Falls back to config, then the default.
+   */
+  maxConcurrency?: number;
+  /** Where this run writes the workflow's declared outputs (`--out`), by key. */
+  outputPaths?: Record<string, string>;
+  /** When the run started, if not now: a handed-off run keeps its first owner's start. */
+  startedAt?: number;
+}
+
 export class Orchestrator {
   private readonly workspaceMap: Map<WorkspaceId, WorkspaceEntry>;
   private workflowCatalog: Record<string, WorkflowSpec>;
@@ -355,21 +368,16 @@ export class Orchestrator {
     approval?: ApprovalProvider,
     control?: WorkflowRunControl,
     humanInput?: HumanInputProvider,
-    /**
-     * Per-run override of the configured `maxConcurrency` (the launch sheet's
-     * "Max parallel runners"). Falls back to config, then the default.
-     */
-    maxConcurrency?: number,
-    /** Where this run writes the workflow's declared outputs (`--out`), by key. */
-    outputPaths?: Record<string, string>,
+    options: RunWorkflowOptions = {},
   ): AsyncIterable<WorkflowEvent> {
+    const { maxConcurrency, outputPaths, startedAt } = options;
     const spec = specOverride ?? this.listWorkflows()[name];
     if (!spec) throw new Error(`unknown workflow '${name}'`);
 
     const agentWorkspace = createGitWorktreeManager();
     const events = runWorkflow(
       spec,
-      { input, cache, inputs, outputPaths },
+      { input, cache, inputs, outputPaths, startedAt },
       {
         createAdapter,
         binaries: this.config.binaries,

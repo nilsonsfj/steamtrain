@@ -2,7 +2,7 @@ import { lstat, mkdir, realpath } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import type { WorkflowOutputResult } from "./events";
 import { STEAMTRAIN_STATE_DIR, atomicWriteFile, isOutside, sanitizePathComponent } from "./fs-util";
-import { type TemplateContext, renderPrompt, templateStepReads } from "./template";
+import { PLACEHOLDER, type TemplateContext, renderPrompt, templateStepReads } from "./template";
 import type { WorkflowSpec } from "./types";
 
 /**
@@ -32,7 +32,10 @@ export interface WriteOutputsOptions {
   /** The run's final template context: input, inputs, step outputs and results. */
   context: TemplateContext;
   /** Each step's final result, to tell a finished step from one that never did. */
-  results: ReadonlyMap<string, { ok: boolean; skipped?: boolean }>;
+  results: ReadonlyMap<
+    string,
+    { ok: boolean; skipped?: boolean; interrupted?: boolean; notRun?: boolean }
+  >;
   /**
    * Destinations the person running chose (`--out key=path`), by output key.
    * Resolved against `cwd` when relative, and not held to it: unlike a path
@@ -53,6 +56,9 @@ export async function writeWorkflowOutputs(
   const timestamp = runTimestamp(new Date(options.startedAt));
   let runDir: Promise<string> | undefined;
   const all: WorkflowOutputResult[] = [];
+  // Outputs on the default path that were not written: the directory they
+  // would have gone to is only known once every output has had its turn.
+  const unwrittenDefault: WorkflowOutputResult[] = [];
   for (const [key, output] of Object.entries(spec.outputs ?? {})) {
     const result: WorkflowOutputResult = { key, written: false };
     if (output.description) result.description = output.description;
@@ -60,32 +66,42 @@ export async function writeWorkflowOutputs(
     try {
       const unfinished = unfinishedStep(output.value, options.results);
       const chosen = options.paths?.[key];
+      const specPath =
+        output.path !== undefined
+          ? resolve(options.cwd, renderOutputPath(output.path, spec, timestamp, options))
+          : undefined;
+      if (unfinished) {
+        result.error = unfinished;
+        if (chosen !== undefined) result.path = resolve(options.cwd, chosen);
+        else if (specPath !== undefined) result.path = specPath;
+        else unwrittenDefault.push(result);
+        continue;
+      }
+      // Only `--out` is the person's own choice and left unchecked: a spec's
+      // path and the default directory both come with the repository, which
+      // can make either a symlink to somewhere else.
+      const held = chosen === undefined;
       let path: string;
       if (chosen !== undefined) {
         path = resolve(options.cwd, chosen);
-      } else if (output.path !== undefined) {
-        path = resolve(options.cwd, renderOutputPath(output.path, spec, timestamp, options));
-      } else if (unfinished) {
-        path = join(defaultRunDir(options.cwd, spec, timestamp), `${key}.md`);
+      } else if (specPath !== undefined) {
+        path = specPath;
       } else {
+        await assertInside(
+          options.cwd,
+          join(defaultRunDir(options.cwd, spec, timestamp), `${key}.md`),
+        );
         // Claimed only once something is written, so a run that writes
         // nothing leaves no empty directory behind.
         runDir ??= claimRunDir(defaultRunDir(options.cwd, spec, timestamp));
         path = join(await runDir, `${key}.md`);
       }
       result.path = path;
-      if (unfinished) {
-        result.error = unfinished;
-        continue;
-      }
-      // Only the spec's own paths are held inside: the default is the
-      // engine's state directory, and `--out` is the person's own choice.
-      const fromSpec = chosen === undefined && output.path !== undefined;
-      if (fromSpec) await assertInside(options.cwd, path);
+      if (held) await assertInside(options.cwd, path);
       await mkdir(dirname(path), { recursive: true });
       // Checked again once its directories exist, in case one was swapped
       // for a symlink in between.
-      if (fromSpec) await assertInside(options.cwd, path);
+      if (held) await assertInside(options.cwd, path);
       const text = renderPrompt(output.value, options.context, { redact: false });
       const body = text.endsWith("\n") || text === "" ? text : `${text}\n`;
       // Written whole or not at all, and by rename, which replaces a symlink
@@ -96,6 +112,11 @@ export async function writeWorkflowOutputs(
     } catch (error) {
       result.error = error instanceof Error ? error.message : String(error);
     }
+  }
+  if (unwrittenDefault.length > 0) {
+    const dir =
+      (await runDir?.catch(() => undefined)) ?? defaultRunDir(options.cwd, spec, timestamp);
+    for (const result of unwrittenDefault) result.path = join(dir, `${result.key}.md`);
   }
   return all;
 }
@@ -111,9 +132,10 @@ function unfinishedStep(
 ): string | undefined {
   for (const [id, read] of templateStepReads(value)) {
     const result = results.get(id);
-    if (!result) return `step '${id}' did not run`;
+    if (!result || result.notRun) return `step '${id}' did not run`;
     if (read === "status") continue;
     if (result.skipped) return `step '${id}' was skipped`;
+    if (result.interrupted) return `step '${id}' was interrupted`;
     if (!result.ok) return `step '${id}' failed`;
   }
   return undefined;
@@ -151,7 +173,7 @@ function renderOutputPath(
   timestamp: string,
   options: WriteOutputsOptions,
 ): string {
-  return template.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (match, expr: string) => {
+  return template.replace(PLACEHOLDER, (match, expr: string) => {
     if (expr === "workflow") return safeSegment(spec.name);
     if (expr === "run.timestamp") return timestamp;
     if (expr.startsWith("inputs.")) {
