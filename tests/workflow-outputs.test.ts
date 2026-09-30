@@ -170,10 +170,13 @@ describe("workflow outputs: lint of step kind and field", () => {
       log: { value: "{{steps.check.output}}", path: "./reports/latest.md" },
       other: { value: "{{steps.check.output}}", path: "reports/{{run.timestamp}}.md" },
       again: { value: "{{steps.check.output}}", path: "reports//latest.md" },
+      copy1: { value: "{{steps.check.output}}", path: "reports/{{workflow}}-latest.md" },
+      copy2: { value: "{{steps.check.output}}", path: "reports/{{workflow}}-latest.md" },
     });
     expect(lintTemplateRefs(spec)).toEqual([
       "outputs 'report' and 'log' both write to './reports/latest.md': the later one overwrites the earlier",
       "outputs 'report' and 'again' both write to 'reports//latest.md': the later one overwrites the earlier",
+      "outputs 'copy1' and 'copy2' both write to 'reports/{{workflow}}-latest.md': the later one overwrites the earlier",
     ]);
   });
 
@@ -768,6 +771,29 @@ describe("workflow outputs: the CLI", () => {
     const id = /\b([0-9a-f-]{36})\b/.exec(history)?.[1] ?? "";
     const shown = await runCliText(["workflow", "history", "show", id]);
     expect(shown).toContain(`output:   saved report → ${saved}`);
+  });
+
+  it("says an output was not saved in history show, when its step failed", async () => {
+    const failing = {
+      outputs: { report: { value: "{{steps.report.output}}" } },
+      phases: [
+        {
+          id: "report",
+          title: "Report",
+          steps: [{ id: "report", kind: "command", cmd: "exit 3" }],
+        },
+      ],
+    };
+    await writeFile(
+      join(dir, "steamtrain.json"),
+      JSON.stringify({ workflows: { fails: failing } }),
+    );
+    const io = { cwd: dir, stdout: () => {}, stderr: () => {} };
+    await runCli(["workflow", "run", "fails", "--input", "x"], io);
+    const history = await runCliText(["workflow", "history"]);
+    const id = /\b([0-9a-f-]{36})\b/.exec(history)?.[1] ?? "";
+    const shown = await runCliText(["workflow", "history", "show", id]);
+    expect(shown).toContain("output:   not saved report: step 'report' failed");
   });
 
   it("writes an output where --out sends it", async () => {
