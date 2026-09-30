@@ -596,6 +596,8 @@ export class RunRecordBuilder {
     error?: string;
     endedAt?: number;
     timedOut?: boolean;
+    /** Outputs the host wrote itself, when the run's own were deferred to a hand-off that failed. */
+    outputs?: WorkflowOutputResult[];
   }): RunRecord {
     const endedAt = opts.endedAt ?? Date.now();
     const phases = this.finalizePhases();
@@ -618,7 +620,7 @@ export class RunRecordBuilder {
       timedOut: opts.status === "canceled" && opts.timedOut ? true : undefined,
       budget: this.budget,
       interventions: this.interventions.length > 0 ? this.interventions : undefined,
-      outputs: this.outputs,
+      outputs: opts.outputs ?? this.outputs,
     };
   }
 

@@ -396,22 +396,33 @@ describe("runCli", () => {
         "hi",
         "--human",
         "check=ok",
+        "--out",
+        "report=r.md",
+        "--dry-run",
+      ]),
+    ).toEqual({ isDryRun: true, planArgs: ["t", "--input", "hi"] });
+    // Flags that only apply to resuming a run are flagged, not silently dropped:
+    // the real run refuses them without --from --retry-failed.
+    expect(
+      splitDryRunArgs([
+        "t",
+        "--input",
+        "hi",
         "--step",
         "a",
         "--retarget-agent",
         "claude",
         "--retarget-model",
         "m",
-        "--out",
-        "report=r.md",
+        "--from",
+        "abc",
+        "--retry-failed",
         "--dry-run",
       ]),
-    ).toEqual({ isDryRun: true, planArgs: ["t", "--input", "hi"] });
-    // A resume has no plan: --from is flagged, not silently dropped.
-    expect(splitDryRunArgs(["--from", "abc", "--input", "x", "--dry-run"])).toEqual({
+    ).toEqual({
       isDryRun: true,
-      planArgs: ["--input", "x"],
-      from: true,
+      planArgs: ["t", "--input", "hi"],
+      resumeFlags: ["--step", "--retarget-agent", "--retarget-model", "--from", "--retry-failed"],
     });
     // --agent passes THROUGH to the plan so the dry-run preview reflects the
     // re-route the real run would apply (it would otherwise show the blocked agent).
@@ -421,15 +432,22 @@ describe("runCli", () => {
     });
   });
 
-  it("explains that a --dry-run cannot preview a --from resume", async () => {
-    const c = capture();
-    const code = await runCli(
-      ["workflow", "run", "--from", "abc", "--input", "x", "--dry-run"],
-      c.io,
-    );
-    expect(code).toBe(1);
-    expect(c.stderr).toContain("--dry-run cannot be combined with --from");
-    expect(c.stderr).not.toContain("usage:");
+  it("refuses --dry-run with a resume's flags, naming them, rather than approving them", async () => {
+    for (const flags of [
+      ["--from", "abc"],
+      ["--step", "s"],
+      ["--retarget-agent", "claude"],
+      ["--retry-failed"],
+    ]) {
+      const c = capture();
+      const code = await runCli(
+        ["workflow", "run", "tour", "--input", "x", ...flags, "--dry-run"],
+        c.io,
+      );
+      expect(code).toBe(1);
+      expect(c.stderr).toContain(`--dry-run cannot be combined with ${flags[0]}`);
+      expect(c.stderr).not.toContain("usage:");
+    }
   });
 
   it("treats flag-looking --input values as text in a --dry-run", async () => {

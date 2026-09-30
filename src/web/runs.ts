@@ -30,6 +30,7 @@ import {
   type WorkflowCacheStore,
   type WorkflowEvent,
   type WorkflowHistoryStore,
+  type WorkflowOutputResult,
   type WorkflowRunControl,
   type WorkflowSpec,
   acquireRunSlot,
@@ -186,6 +187,13 @@ interface Run {
    * a terminal outcome.
    */
   handoffCommitted?: boolean;
+  /**
+   * Writes the run's outputs here, offered by the engine when it skipped them
+   * for a hand-off. Used only if that hand-off fails and no runner will.
+   */
+  deferredOutputs?: () => Promise<WorkflowOutputResult[]>;
+  /** What that write produced, for the history record. */
+  outputs?: WorkflowOutputResult[];
 }
 
 interface PendingInputRegistration {
@@ -610,6 +618,8 @@ export class WorkflowRunManager {
     if (!spawned.ok) {
       run.status = "error";
       run.error = `detach failed: ${spawned.error}`;
+      // No runner will write the outputs the engine held back, so write them here.
+      run.outputs = await run.deferredOutputs?.().catch(() => undefined);
       return false;
     }
     // The run is now owned by an independent process. A terminal `detached`
@@ -918,7 +928,12 @@ export class WorkflowRunManager {
         approval,
         run.control,
         humanInput,
-        { maxConcurrency: opts.maxParallel },
+        {
+          maxConcurrency: opts.maxParallel,
+          onOutputsDeferred: (write) => {
+            run.deferredOutputs = write;
+          },
+        },
       )) {
         // Mid-run detach committed: stop recording, mirroring, and emitting
         // events — the detached child owns the run's record and stream from
@@ -1045,7 +1060,13 @@ export class WorkflowRunManager {
     const status = run.status === "running" ? "done" : run.status;
     try {
       await this.historyStore.save(
-        recorder.build({ status, error: run.error, endedAt: run.endedAt, timedOut: run.timedOut }),
+        recorder.build({
+          status,
+          error: run.error,
+          endedAt: run.endedAt,
+          timedOut: run.timedOut,
+          outputs: run.outputs,
+        }),
       );
     } catch {
       // History is best-effort; a failed write must not surface to the run.

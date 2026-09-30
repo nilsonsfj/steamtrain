@@ -36,7 +36,9 @@ Key properties and expectations:
   `.steamtrain/outputs/` holds the files workflows save as their declared
   outputs. Those are written as rendered, without secret redaction: they are
   the deliverable. An output `path` in a spec can place one outside
-  `.steamtrain/`, where the ignore rule below does not cover it.
+  `.steamtrain/`, where the ignore rule below does not cover it, and can
+  replace any file in the project (never `.git` or the rest of `.steamtrain/`),
+  so treat a spec's `outputs` paths as you would its commands.
   `steamtrain init` offers to add `.steamtrain/` to your `.gitignore`;
   accept it (or add the entry yourself) so history never lands in commits.
   Template expansion also best-effort redacts high-confidence secret shapes

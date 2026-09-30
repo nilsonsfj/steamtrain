@@ -33,7 +33,7 @@ import {
   workflowPermissionPreflight,
 } from "../workflow";
 import type { PlanRerouteOptions, PlanRerouteResult } from "../workflow";
-import type { RunRecord } from "../workflow";
+import type { RunRecord, WorkflowOutputResult } from "../workflow";
 import type { ApprovalProvider, HumanInputProvider, WorkflowRunControl } from "../workflow";
 import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId } from "../workspace";
 import { workspaceById } from "../workspace";
@@ -63,6 +63,8 @@ export interface RunWorkflowOptions {
   outputPaths?: Record<string, string>;
   /** When the run started, if not now: a handed-off run keeps its first owner's start. */
   startedAt?: number;
+  /** See {@link WorkflowRunContext.onOutputsDeferred}: for a host that can hand a run off. */
+  onOutputsDeferred?: (write: () => Promise<WorkflowOutputResult[]>) => void;
 }
 
 export class Orchestrator {
@@ -370,14 +372,14 @@ export class Orchestrator {
     humanInput?: HumanInputProvider,
     options: RunWorkflowOptions = {},
   ): AsyncIterable<WorkflowEvent> {
-    const { maxConcurrency, outputPaths, startedAt } = options;
+    const { maxConcurrency, outputPaths, startedAt, onOutputsDeferred } = options;
     const spec = specOverride ?? this.listWorkflows()[name];
     if (!spec) throw new Error(`unknown workflow '${name}'`);
 
     const agentWorkspace = createGitWorktreeManager();
     const events = runWorkflow(
       spec,
-      { input, cache, inputs, outputPaths, startedAt },
+      { input, cache, inputs, outputPaths, startedAt, onOutputsDeferred },
       {
         createAdapter,
         binaries: this.config.binaries,

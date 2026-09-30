@@ -3,7 +3,7 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import type { WorkflowOutputResult } from "./events";
 import { STEAMTRAIN_STATE_DIR, atomicWriteFile, isOutside, sanitizePathComponent } from "./fs-util";
 import { PLACEHOLDER, type TemplateContext, renderPrompt, templateStepReads } from "./template";
-import type { WorkflowSpec } from "./types";
+import { type WorkflowSpec, touchesStateDir } from "./types";
 
 /**
  * Workflow outputs: the named results a workflow declares next to its inputs
@@ -42,6 +42,12 @@ export interface WriteOutputsOptions {
    * in the spec, which may come from any repository, these are theirs.
    */
   paths?: Readonly<Record<string, string>>;
+  /**
+   * Asked before each output is written: a reason to write no more (the run
+   * was handed to a background runner that will write them), or undefined to
+   * carry on. A hand-off can land while earlier outputs are being written.
+   */
+  stopWith?: () => string | undefined;
 }
 
 /**
@@ -63,6 +69,11 @@ export async function writeWorkflowOutputs(
     const result: WorkflowOutputResult = { key, written: false };
     if (output.description) result.description = output.description;
     all.push(result);
+    const stop = options.stopWith?.();
+    if (stop) {
+      result.error = stop;
+      continue;
+    }
     try {
       const unfinished = unfinishedStep(output.value, options.results);
       const chosen =
@@ -88,10 +99,10 @@ export async function writeWorkflowOutputs(
       } else if (specPath !== undefined) {
         path = specPath;
       } else {
-        await assertInside(
-          options.cwd,
-          join(defaultRunDir(options.cwd, spec, timestamp), `${key}.md`),
-        );
+        // Named before the checks, so a refusal still says where it was meant to go.
+        const intended = join(defaultRunDir(options.cwd, spec, timestamp), `${key}.md`);
+        result.path = intended;
+        await assertInside(options.cwd, intended);
         // Claimed only when an output is about to be written, so a run that
         // writes nothing leaves no empty directory behind.
         runDir ??= claimRunDir(defaultRunDir(options.cwd, spec, timestamp));
@@ -178,7 +189,9 @@ function renderOutputPath(
     if (expr === "workflow") return safeSegment(spec.name);
     if (expr === "run.timestamp") return timestamp;
     if (expr.startsWith("inputs.")) {
-      return safeSegment(String(options.context.inputs?.[expr.slice(7)] ?? ""));
+      const inputs = options.context.inputs ?? {};
+      const name = expr.slice(7);
+      return safeSegment(Object.hasOwn(inputs, name) ? String(inputs[name] ?? "") : "");
     }
     return match;
   });
@@ -205,7 +218,11 @@ async function assertInside(cwd: string, path: string): Promise<void> {
   const target = join(await realpathOfExisting(dirname(resolve(path))), basename(path));
   const rel = relative(root, target);
   if (isOutside(rel) || rel === "") refuse();
-  if (rel.split(/[\\/]/).some((segment) => segment.toLowerCase() === ".git")) refuse();
+  const segments = rel.split(/[\\/]/);
+  if (segments.some((segment) => segment.toLowerCase() === ".git")) refuse();
+  // The run history and step cache are `.steamtrain/`'s other contents: an
+  // output that replaced one would corrupt the engine's own state.
+  if (touchesStateDir(segments)) refuse();
   const existing = await lstat(target).catch(() => undefined);
   if (existing?.isSymbolicLink()) refuse();
 }

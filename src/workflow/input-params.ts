@@ -27,8 +27,15 @@ export function isStringLikeInputType(type: WorkflowInputType): boolean {
   return type === "string" || type === "model" || type === "agent" || type === "enum";
 }
 
+/** What an input or output may be called: the one grammar names and `{{inputs.key}}` share. */
+export const IDENTIFIER_PATTERN = "[a-zA-Z_][a-zA-Z0-9_-]*";
+export const IDENTIFIER_RE = new RegExp(`^${IDENTIFIER_PATTERN}$`);
+
 /** Match `{{inputs.key}}` placeholders (optional whitespace inside braces). */
-const INPUT_PLACEHOLDER_RE = /\{\{\s*inputs\.([a-zA-Z_][a-zA-Z0-9_-]*)\s*\}\}/g;
+const INPUT_PLACEHOLDER_RE = new RegExp(
+  `\\{\\{\\s*inputs\\.(${IDENTIFIER_PATTERN})\\s*\\}\\}`,
+  "g",
+);
 
 /**
  * Collect every `inputs.<key>` referenced by a template string, in order of
