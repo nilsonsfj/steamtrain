@@ -27,6 +27,7 @@ import {
   runRunsCommand,
   runTakeoverCommand,
   runWorkflowCommand,
+  undeclaredOutputMessages,
 } from "./run-cli";
 import { loadSettings } from "./settings";
 import type { AgentInstanceId } from "./types/events";
@@ -368,11 +369,20 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
       const dryRun = splitDryRunArgs(rest);
       if (dryRun.isDryRun) {
         if (dryRun.resumeFlags) {
-          // These only apply to resuming a recorded run, which has no plan to preview.
+          // A dry run plans a workflow by name; it does not preview a resume.
           err(
-            `--dry-run cannot be combined with ${dryRun.resumeFlags.join(", ")}: they only apply to resuming a run (--from <runId> --retry-failed), which has no plan to preview\n`,
+            `--dry-run cannot be combined with ${dryRun.resumeFlags.join(", ")}: a dry run plans a workflow by name and does not preview a resume\n`,
           );
           return 1;
+        }
+        if (dryRun.outs) {
+          // Dropped from the plan, but a mistyped --out is a mistake the real run
+          // refuses, so the preview must not approve it.
+          const outIssue = dryRunOutIssue(orchestrator, dryRun.planArgs[0], dryRun.outs);
+          if (outIssue) {
+            err(`${outIssue}\n`);
+            return 1;
+          }
         }
         return planCommand(orchestrator, dryRun.planArgs, io, out, err);
       }
@@ -502,6 +512,8 @@ export function splitDryRunArgs(args: string[]): {
    * preview, and dropping them would approve a command line the real run refuses.
    */
   resumeFlags?: string[];
+  /** The `--out` values given, dropped from the plan but checked against the workflow. */
+  outs?: string[];
 } {
   const valueTaking = new Set([
     "--input",
@@ -542,6 +554,7 @@ export function splitDryRunArgs(args: string[]): {
   const dropBare = new Set(["--dry-run", "--fresh", "--detach", "-d", "--approve-all"]);
   let isDryRun = false;
   const resumeFlags: string[] = [];
+  const outs: string[] = [];
   const planArgs: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -549,6 +562,7 @@ export function splitDryRunArgs(args: string[]): {
     if (valueTaking.has(arg)) {
       const value = args[i + 1];
       if (resumeOnly.has(arg)) resumeFlags.push(arg);
+      else if (arg === "--out") outs.push(value ?? "");
       else if (!dropWithValue.has(arg)) {
         planArgs.push(arg);
         if (value !== undefined) planArgs.push(value);
@@ -567,7 +581,33 @@ export function splitDryRunArgs(args: string[]): {
     if (dropBare.has(arg)) continue;
     planArgs.push(arg);
   }
-  return resumeFlags.length > 0 ? { isDryRun, planArgs, resumeFlags } : { isDryRun, planArgs };
+  return {
+    isDryRun,
+    planArgs,
+    ...(resumeFlags.length > 0 ? { resumeFlags } : {}),
+    ...(outs.length > 0 ? { outs } : {}),
+  };
+}
+
+/** What is wrong with the `--out` values of a dry run, judged as the real run judges them. */
+function dryRunOutIssue(
+  orchestrator: Orchestrator,
+  name: string | undefined,
+  outs: string[],
+): string | undefined {
+  const paths: Record<string, string> = {};
+  for (const value of outs) {
+    const eq = value.indexOf("=");
+    const key = value.slice(0, eq);
+    if (eq < 1 || eq === value.length - 1 || key.startsWith("-") || key === "__proto__") {
+      return `--out expects <output>=<path>, got '${value}'`;
+    }
+    if (Object.hasOwn(paths, key)) return `--out given more than once for '${key}'`;
+    paths[key] = value.slice(eq + 1);
+  }
+  const spec = name && !name.startsWith("--") ? orchestrator.listWorkflows()[name] : undefined;
+  // An unknown workflow is the plan's own error to report.
+  return spec && name ? undeclaredOutputMessages(name, spec, paths)[0] : undefined;
 }
 
 function parsePlanOptions(args: string[]): PlanOptions | null {

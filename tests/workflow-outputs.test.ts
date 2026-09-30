@@ -812,6 +812,25 @@ describe("workflow outputs: the CLI", () => {
     expect(stderr).toContain("usage:");
   });
 
+  it("checks --out under --dry-run as the real run does, and writes nothing", async () => {
+    const good = await cli(["--out", "report=notes/bugs.md", "--dry-run"]);
+    expect(good.code).toBe(0);
+    await expect(readFile(join(dir, "notes", "bugs.md"), "utf8")).rejects.toThrow();
+
+    const unknown = await cli(["--out", "summary=x.md", "--dry-run"]);
+    expect(unknown.code).toBe(1);
+    expect(unknown.stderr).toContain("declares no output 'summary'");
+
+    for (const bad of ["report", "report=", "-x=y.md"]) {
+      const malformed = await cli(["--out", bad, "--dry-run"]);
+      expect(malformed.code).toBe(1);
+      expect(malformed.stderr).toContain("--out expects <output>=<path>");
+    }
+    const twice = await cli(["--out", "report=a.md", "--out", "report=b.md", "--dry-run"]);
+    expect(twice.code).toBe(1);
+    expect(twice.stderr).toContain("more than once");
+  });
+
   it("refuses --out for an output the workflow does not declare", async () => {
     const { code, stderr } = await cli(["--out", "summary=x.md"]);
     expect(code).toBe(1);

@@ -400,7 +400,7 @@ describe("runCli", () => {
         "report=r.md",
         "--dry-run",
       ]),
-    ).toEqual({ isDryRun: true, planArgs: ["t", "--input", "hi"] });
+    ).toEqual({ isDryRun: true, planArgs: ["t", "--input", "hi"], outs: ["report=r.md"] });
     // Flags that only apply to resuming a run are flagged, not silently dropped:
     // the real run refuses them without --from --retry-failed.
     expect(
@@ -433,15 +433,17 @@ describe("runCli", () => {
   });
 
   it("refuses --dry-run with a resume's flags, naming them, rather than approving them", async () => {
-    for (const flags of [
-      ["--from", "abc"],
-      ["--step", "s"],
-      ["--retarget-agent", "claude"],
-      ["--retry-failed"],
-    ]) {
+    const cases: Array<{ name?: string; flags: string[] }> = [
+      { name: "tour", flags: ["--from", "abc"] },
+      { flags: ["--from", "abc"] },
+      { name: "tour", flags: ["--step", "s"] },
+      { name: "tour", flags: ["--retarget-agent", "claude"] },
+      { name: "tour", flags: ["--retry-failed"] },
+    ];
+    for (const { name, flags } of cases) {
       const c = capture();
       const code = await runCli(
-        ["workflow", "run", "tour", "--input", "x", ...flags, "--dry-run"],
+        ["workflow", "run", ...(name ? [name] : []), "--input", "x", ...flags, "--dry-run"],
         c.io,
       );
       expect(code).toBe(1);
