@@ -408,6 +408,17 @@ export function reviewShareWorkflow(spec: WorkflowSpec): ShareReview {
     }
   }
 
+  // An output's `path` is a file the run replaces in the project when it ends,
+  // whatever the steps' permissions: say so, as a command's shell is said.
+  for (const [name, output] of Object.entries(spec.outputs ?? {})) {
+    if (!output.path) continue;
+    findings.push({
+      severity: "medium",
+      code: "output_path",
+      message: `output '${name}' replaces '${output.path}' in the project when a run ends (read-only runs included)`,
+    });
+  }
+
   if (spec.permissions) {
     const profile = permissionProfile(spec.permissions);
     if (profile === "full") {

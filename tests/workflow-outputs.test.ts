@@ -169,6 +169,22 @@ describe("workflow outputs: lint of step kind and field", () => {
     ]);
   });
 
+  it("judges a json or artifact field by the pattern that named the step", () => {
+    const spec: WorkflowSpec = {
+      name: "hunt",
+      outputs: {
+        // A field of the step's JSON that happens to be called exitCode: valid.
+        a: { value: "{{steps.report.json.exitCode}}" },
+        // `artifacts.output` is an artifact named "output", not the step's output.
+        b: { value: "{{steps.report.artifacts.output}}" },
+      },
+      phases: reportSpec(undefined).phases,
+    };
+    expect(lintTemplateRefs(spec)).toEqual([
+      "output 'b' references 'report.artifacts.output' but 'report' has no declared artifacts",
+    ]);
+  });
+
   it("warns about an output value that would render empty", () => {
     const spec: WorkflowSpec = {
       name: "hunt",
