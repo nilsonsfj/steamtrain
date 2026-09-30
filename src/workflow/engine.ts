@@ -428,7 +428,8 @@ export async function* runWorkflow(
     name: runnableSpec.name,
     phaseCount: runnableSpec.phases.length,
     stepCount: totalSteps,
-    ts: Date.now(),
+    // The run's start, as the output directory and {{run.timestamp}} read it.
+    ts: startedAt,
   };
 
   const env: RunEnv = {

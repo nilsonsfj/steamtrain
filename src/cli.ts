@@ -367,6 +367,11 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
       // treated as text, never as a flag.
       const dryRun = splitDryRunArgs(rest);
       if (dryRun.isDryRun) {
+        if (dryRun.from) {
+          // A resume re-runs a recorded run; it is not a workflow and input to plan.
+          err("--dry-run cannot be combined with --from: a resume has no plan to preview\n");
+          return 1;
+        }
         return planCommand(orchestrator, dryRun.planArgs, io, out, err);
       }
       return runWorkflowCommand(orchestrator, config, rest, io, out, err);
@@ -486,7 +491,12 @@ interface PlanOptions {
  * Example: `run tour --input --dry-run` runs the workflow with the literal
  * input "--dry-run"; `run tour --input hi --dry-run` prints the plan.
  */
-export function splitDryRunArgs(args: string[]): { isDryRun: boolean; planArgs: string[] } {
+export function splitDryRunArgs(args: string[]): {
+  isDryRun: boolean;
+  planArgs: string[];
+  /** Set when `--from` was given: a resume has no plan to preview. */
+  from?: true;
+} {
   const valueTaking = new Set([
     "--input",
     "-i",
@@ -509,7 +519,6 @@ export function splitDryRunArgs(args: string[]): { isDryRun: boolean; planArgs: 
   // agent). The rest are run-only, which the plan has no flag for: they are
   // dropped with their values rather than sent to fail its parser.
   const dropWithValue = new Set([
-    "--from",
     "--on-approval",
     "--report",
     "--output",
@@ -529,13 +538,15 @@ export function splitDryRunArgs(args: string[]): { isDryRun: boolean; planArgs: 
     "--retry-failed",
   ]);
   let isDryRun = false;
+  let from = false;
   const planArgs: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === undefined) continue;
     if (valueTaking.has(arg)) {
       const value = args[i + 1];
-      if (!dropWithValue.has(arg)) {
+      if (arg === "--from") from = true;
+      if (!dropWithValue.has(arg) && arg !== "--from") {
         planArgs.push(arg);
         if (value !== undefined) planArgs.push(value);
       }
@@ -549,7 +560,7 @@ export function splitDryRunArgs(args: string[]): { isDryRun: boolean; planArgs: 
     if (dropBare.has(arg)) continue;
     planArgs.push(arg);
   }
-  return { isDryRun, planArgs };
+  return from ? { isDryRun, planArgs, from: true } : { isDryRun, planArgs };
 }
 
 function parsePlanOptions(args: string[]): PlanOptions | null {

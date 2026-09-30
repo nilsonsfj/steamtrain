@@ -289,6 +289,14 @@ describe("workflow outputs: a run writes them", () => {
     );
   });
 
+  it("stamps the start event with the same clock the directory is named for", async () => {
+    const startedAt = new Date(2026, 0, 2, 3, 4, 5).getTime();
+    const events = await run(reportSpec({ report: { value: "{{steps.report.output}}" } }), {
+      startedAt,
+    });
+    expect(events.find((e) => e.kind === "workflow_start")).toMatchObject({ ts: startedAt });
+  });
+
   it("does not write a sub-workflow's outputs, only the outer run's", async () => {
     const child = reportSpec({ childReport: { value: "{{steps.report.output}}" } });
     const parent: WorkflowSpec = {
