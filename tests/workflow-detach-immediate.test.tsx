@@ -6,8 +6,14 @@ import { render } from "ink-testing-library";
 import { useEffect, useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Orchestrator } from "../src/orchestrator";
+import type { RunWorkflowOptions } from "../src/orchestrator/orchestrator";
 import { useWorkflowRunner } from "../src/tui/useWorkflowRunner";
-import { type WorkflowEvent, type WorkflowSpec, workflowCacheKey } from "../src/workflow";
+import {
+  type RunRecord,
+  type WorkflowEvent,
+  type WorkflowSpec,
+  workflowCacheKey,
+} from "../src/workflow";
 
 type Runner = ReturnType<typeof useWorkflowRunner>;
 const spec: WorkflowSpec = {
@@ -112,6 +118,70 @@ describe("TUI immediate mid-run detach", () => {
       if (!detached) await delay(10);
     }
     expect(detached).toBe(true);
+    view.unmount();
+  });
+
+  it("records the error and the outputs it wrote itself when the hand-off fails", async () => {
+    // No entry script, so the background spawn fails and the run ends here.
+    process.argv[1] = "";
+    let activeSignal: AbortSignal | undefined;
+    const orchestrator = {
+      canDispatchWorkflowSpec: () => ({ ok: true }),
+      getConfig: () => ({}),
+      runWorkflow(
+        _name: string,
+        _input: string,
+        signal?: AbortSignal,
+        _cache?: unknown,
+        _cwd?: string,
+        _spec?: unknown,
+        _params?: unknown,
+        _approval?: unknown,
+        _control?: unknown,
+        _humanInput?: unknown,
+        options?: RunWorkflowOptions,
+      ): AsyncIterable<WorkflowEvent> {
+        activeSignal = signal;
+        return (async function* () {
+          yield { kind: "workflow_start", name: spec.name, phaseCount: 1, stepCount: 1, ts: 0 };
+          await new Promise<void>((resolve) =>
+            signal?.addEventListener("abort", () => resolve(), { once: true }),
+          );
+          // What the engine does for an output it skipped for the hand-off.
+          options?.onOutputsDeferred?.(async () => [
+            { key: "report", written: true, path: join(root, "report.md"), bytes: 4 },
+          ]);
+        })();
+      },
+    } as unknown as Orchestrator;
+
+    let runner: Runner | undefined;
+    const view = render(
+      <Harness
+        cwd={root}
+        orchestrator={orchestrator}
+        onRunner={(next) => {
+          runner = next;
+        }}
+      />,
+    );
+    expect(runner?.runWorkflow(spec.name, "go")).toBe(true);
+    for (let i = 0; i < 100 && !activeSignal; i++) await delay(10);
+    expect(await runner?.detachRun()).toBeNull();
+
+    let record: RunRecord | null | undefined = null;
+    for (let i = 0; i < 300 && !record; i++) {
+      const [summary] = await runner!.historyStoreRef.current.list();
+      record = summary ? await runner!.historyStoreRef.current.get(summary.id) : null;
+      if (!record) await delay(10);
+    }
+    // One record, saved once: it says the hand-off failed, not that the run
+    // was canceled, and it keeps where the outputs went.
+    expect(record?.status).toBe("error");
+    expect(record?.error).toMatch(/^detach failed/);
+    expect(record?.outputs).toEqual([
+      { key: "report", written: true, path: join(root, "report.md"), bytes: 4 },
+    ]);
     view.unmount();
   });
 
