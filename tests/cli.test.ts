@@ -363,6 +363,17 @@ describe("runCli", () => {
     expect(existsSync(join(c.io.cwd, WORKFLOW_HISTORY_DIR))).toBe(false);
   });
 
+  it("drops --human and its value from a --dry-run", async () => {
+    const c = capture();
+    const code = await runCli(
+      ["workflow", "run", "tour", "--input", "hi", "--human", "check=ok", "--dry-run"],
+      c.io,
+    );
+
+    expect(code).toBe(0);
+    expect(c.stdout).toContain("plan: tour");
+  });
+
   it("drops --on-approval and its value from a --dry-run", async () => {
     const c = capture();
     const code = await runCli(
