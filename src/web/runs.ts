@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { SteamtrainConfig } from "../config";
+import type { RunWorkflowOptions } from "../orchestrator/orchestrator";
 import {
   type ApprovalDecision,
   type ApprovalProvider,
@@ -94,7 +95,7 @@ export interface WorkflowHost {
     control?: WorkflowRunControl,
     humanInput?: HumanInputProvider,
     /** Per-run knobs; `maxConcurrency` is the launch sheet's "Max parallel runners". */
-    options?: { maxConcurrency?: number },
+    options?: RunWorkflowOptions,
   ): AsyncIterable<WorkflowEvent>;
 }
 

@@ -412,6 +412,15 @@ describe("workflow outputs: writing", () => {
     expect(report).toMatchObject({ written: false, error: "step 'review' failed" });
   });
 
+  it("does not mistake an inherited property for a chosen destination", async () => {
+    const [output] = await writeWorkflowOutputs(
+      { name: "hunt", outputs: { constructor: { value: "body" } }, phases: [] },
+      { cwd: dir, startedAt: Date.now(), context, results, paths: {} },
+    );
+    expect(output?.written).toBe(true);
+    expect(output?.path).toMatch(/constructor\.md$/);
+  });
+
   it("creates nothing through a symlinked directory on the way", async () => {
     const outside = await mkdtemp(join(tmpdir(), "steamtrain-outputs-outside-"));
     try {

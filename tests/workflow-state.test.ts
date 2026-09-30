@@ -291,6 +291,37 @@ describe("workflowReducer", () => {
     expect(flat[0]?.step.result?.output).toBe("hello");
   });
 
+  it("carries a record's saved outputs into the state history detail draws", () => {
+    const outputs = [
+      { key: "report", written: true, path: "/work/app/report.md" },
+      { key: "log", written: false, error: "step 'check' failed" },
+    ];
+    const state = workflowStateFromRecord({
+      version: 2,
+      id: "r2",
+      workflow: "demo",
+      input: "go",
+      cwd: tmpdir(),
+      status: "done",
+      ok: true,
+      startedAt: 100,
+      endedAt: 200,
+      durationMs: 100,
+      totals: {
+        steps: 0,
+        ok: 0,
+        failed: 0,
+        cached: 0,
+        costUsd: 0,
+        tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+        durationMs: 0,
+      },
+      phases: [],
+      outputs,
+    });
+    expect(state.outputs).toEqual(outputs);
+  });
+
   it("populates results from step results in workflowStateFromRecord (M8)", () => {
     const result1: StepResult = { stepId: "a", ok: true, output: "done a", durationMs: 10 };
     const result2: StepResult = {

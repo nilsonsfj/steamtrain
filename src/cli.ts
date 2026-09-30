@@ -499,11 +499,27 @@ export function splitDryRunArgs(args: string[]): { isDryRun: boolean; planArgs: 
     "--output",
     "-o",
     "--out",
+    "--human",
+    "--step",
+    "--retarget-agent",
+    "--retarget-model",
   ]);
   // --agent passes THROUGH to the plan so the dry-run preview reflects the
   // re-route it would apply (otherwise the plan would lie, showing the blocked
-  // agent). --on-approval / --report / --output / --out are run-only and dropped.
-  const dropWithValue = new Set(["--on-approval", "--report", "--output", "-o", "--out"]);
+  // agent). The rest are run-only, which the plan has no flag for: they are
+  // dropped with their values rather than sent to fail its parser.
+  const dropWithValue = new Set([
+    "--from",
+    "--on-approval",
+    "--report",
+    "--output",
+    "-o",
+    "--out",
+    "--human",
+    "--step",
+    "--retarget-agent",
+    "--retarget-model",
+  ]);
   const dropBare = new Set([
     "--dry-run",
     "--fresh",
