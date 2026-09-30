@@ -115,6 +115,8 @@ describe("workflow outputs: validation", () => {
     ["a Windows drive path", "C:\\reports\\x.md", "must be relative"],
     ["a path that climbs out", "reports/../../x.md", "must not climb out"],
     ["a path into .git", ".git/hooks/pre-commit", "must not write into .git"],
+    ["the directory itself", ".", "must name a file"],
+    ["a bare ./", "./", "must name a file"],
     ["the run history", ".steamtrain/history/x.json", "must not write into .steamtrain/"],
     ["the step cache", "./.STEAMTRAIN/cache/x.json", "must not write into .steamtrain/"],
     ["the outputs directory itself", ".steamtrain/outputs", "must not write into .steamtrain/"],
@@ -778,6 +780,15 @@ describe("workflow outputs: the CLI", () => {
       const runId = /detached run (\S+)/.exec(stdout)?.[1] ?? "";
       const meta = await createLiveRunStore(join(dir, WORKFLOW_RUNS_DIR)).get(runId);
       expect(meta?.launch?.outputPaths).toEqual({ report: "notes/bugs.md" });
+
+      // The background runner, given that launch, writes to the same place.
+      const code2 = await runCli(["workflow", "_detached-runner", runId], {
+        cwd: dir,
+        stdout: () => {},
+        stderr: () => {},
+      });
+      expect(code2).toBe(0);
+      expect(await readFile(join(dir, "notes", "bugs.md"), "utf8")).toBe("Report on the parser\n");
     } finally {
       process.argv[1] = entry ?? "";
     }

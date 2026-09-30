@@ -508,8 +508,10 @@ export function splitDryRunArgs(args: string[]): {
   planArgs: string[];
   /**
    * Flags that only apply to resuming a recorded run (`--from`, `--retry-failed`
-   * and the `--step` / `--retarget-*` that narrow one). A resume has no plan to
-   * preview, and dropping them would approve a command line the real run refuses.
+   * and the `--step` / `--retarget-*` that narrow one). A dry run plans a workflow
+   * by name and does not preview a resume, and dropping them would approve a
+   * command line the real run refuses (`--retry-failed`, `--step`, `--retarget-*`
+   * without `--from`) or one that is not what it looks like (`--from`).
    */
   resumeFlags?: string[];
   /** The `--out` values given, dropped from the plan but checked against the workflow. */
