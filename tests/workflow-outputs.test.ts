@@ -6,6 +6,7 @@ import { runCli } from "../src/cli";
 import {
   RUN_HANDOFF_ABORT,
   RunRecordBuilder,
+  type StepResult,
   WORKFLOW_RUNS_DIR,
   type WorkflowDeps,
   type WorkflowEvent,
@@ -73,6 +74,7 @@ async function run(
   ctx: {
     outputPaths?: Record<string, string>;
     startedAt?: number;
+    cache?: Map<string, StepResult>;
     onOutputsDeferred?: (write: () => Promise<WorkflowOutputResult[]>) => void;
   } = {},
   extra: Partial<WorkflowDeps> = {},
@@ -401,6 +403,21 @@ describe("workflow outputs: a run writes them", () => {
     expect(deferred).toHaveLength(1);
     const written = await deferred[0]?.();
     expect(written?.[0]).toMatchObject({ written: true });
+    expect(await readFile(join(dir, "out", "report.md"), "utf8")).toBe("Findings for the parser\n");
+  });
+
+  it("writes the outputs of a run whose steps all came from the cache", async () => {
+    const spec = reportSpec({
+      report: { value: "{{steps.report.output}}", path: "out/report.md" },
+    });
+    const first = await run(spec);
+    const cache = new Map(done(first).results.map((result) => [result.stepId, result]));
+    await rm(join(dir, "out"), { recursive: true, force: true });
+
+    // A --from re-run seeds every step; none runs, and the file is still written.
+    const again = await run(spec, { cache });
+    expect(again.some((event) => event.kind === "step_done" && !event.cached)).toBe(false);
+    expect(done(again).outputs?.[0]).toMatchObject({ written: true });
     expect(await readFile(join(dir, "out", "report.md"), "utf8")).toBe("Findings for the parser\n");
   });
 

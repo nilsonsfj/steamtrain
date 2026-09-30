@@ -297,7 +297,8 @@ and web UI show the path when the run ends.
   `--out` the real run would refuse (an undeclared output, a malformed value,
   the same key twice). It refuses the flags that only
   apply to resuming a run (`--from`, `--retry-failed`, `--step`,
-  `--retarget-*`), naming them: a resume has no plan to preview.
+  `--retarget-*`), naming them: a dry run plans a workflow by name, and
+  `workflow plan` cannot yet express a resume.
 
 Output files are kept. History keeps only the latest runs, and
 `workflow history clear` deletes the records, but neither removes the files
