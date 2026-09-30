@@ -69,13 +69,10 @@ export async function writeWorkflowOutputs(
     const result: WorkflowOutputResult = { key, written: false };
     if (output.description) result.description = output.description;
     all.push(result);
-    const stop = options.stopWith?.();
-    if (stop) {
-      result.error = stop;
-      continue;
-    }
     try {
-      const unfinished = unfinishedStep(output.value, options.results);
+      // A hand-off stops an output as a step that did not finish does: it is
+      // not written, and says where it would have gone.
+      const unfinished = options.stopWith?.() ?? unfinishedStep(output.value, options.results);
       const chosen =
         options.paths && Object.hasOwn(options.paths, key) ? options.paths[key] : undefined;
       const specPath =

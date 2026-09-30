@@ -531,12 +531,7 @@ async function runOutputs(
   const isHandingOff = () => Boolean(signal?.aborted && signal.reason === RUN_HANDOFF_ABORT);
   if (isHandingOff()) {
     ctx.onOutputsDeferred?.(() => write());
-    return Object.entries(spec.outputs).map(([key, output]) => ({
-      key,
-      ...(output.description ? { description: output.description } : {}),
-      written: false,
-      error: handedOff,
-    }));
+    return write(() => handedOff);
   }
   // The hand-off can also land while the outputs are being written; the ones
   // not yet written are then left to the runner, and offered back if it fails.

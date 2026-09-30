@@ -158,6 +158,17 @@ describe("workflow outputs: validation", () => {
 });
 
 describe("workflow outputs: lint of step kind and field", () => {
+  it("warns when two outputs write to the same literal path", () => {
+    const spec = reportSpec({
+      report: { value: "{{steps.report.output}}", path: "reports/latest.md" },
+      log: { value: "{{steps.check.output}}", path: "./reports/latest.md" },
+      other: { value: "{{steps.check.output}}", path: "reports/{{run.timestamp}}.md" },
+    });
+    expect(lintTemplateRefs(spec)).toEqual([
+      "outputs 'report' and 'log' both write to './reports/latest.md': the later one overwrites the earlier",
+    ]);
+  });
+
   it("warns about an output value that would render empty", () => {
     const spec: WorkflowSpec = {
       name: "hunt",
@@ -309,8 +320,14 @@ describe("workflow outputs: a run writes them", () => {
       {},
       ac.signal,
     );
+    // It says where the runner will write it, as an output that did not finish does.
     expect(done(events).outputs).toEqual([
-      { key: "report", written: false, error: "the run was handed to a background runner" },
+      {
+        key: "report",
+        written: false,
+        error: "the run was handed to a background runner",
+        path: expect.stringMatching(/\.steamtrain[/\\]outputs[/\\]hunt[/\\].+[/\\]report\.md$/),
+      },
     ]);
     await expect(readdir(join(dir, ".steamtrain"))).rejects.toThrow();
   });
@@ -334,6 +351,7 @@ describe("workflow outputs: a run writes them", () => {
       ["second", false],
     ]);
     expect(results[1]?.error).toBe("the run was handed to a background runner");
+    expect(results[1]?.path).toBe(join(dir, "out", "second.md"));
     await expect(readFile(join(dir, "out", "second.md"), "utf8")).rejects.toThrow();
   });
 
