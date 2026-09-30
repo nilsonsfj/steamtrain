@@ -230,7 +230,7 @@ export function parseRunOptions(args: string[]): RunOptions | null {
       const eq = value.indexOf("=");
       if (eq < 1 || eq === value.length - 1) return null;
       const key = value.slice(0, eq);
-      if (key.startsWith("-") || key in options.outputPaths) return null;
+      if (key.startsWith("-") || Object.hasOwn(options.outputPaths, key)) return null;
       options.outputPaths[key] = value.slice(eq + 1);
       i += 1;
     } else {

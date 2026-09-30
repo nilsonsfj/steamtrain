@@ -65,7 +65,8 @@ export async function writeWorkflowOutputs(
     all.push(result);
     try {
       const unfinished = unfinishedStep(output.value, options.results);
-      const chosen = options.paths?.[key];
+      const chosen =
+        options.paths && Object.hasOwn(options.paths, key) ? options.paths[key] : undefined;
       const specPath =
         output.path !== undefined
           ? resolve(options.cwd, renderOutputPath(output.path, spec, timestamp, options))
@@ -91,8 +92,8 @@ export async function writeWorkflowOutputs(
           options.cwd,
           join(defaultRunDir(options.cwd, spec, timestamp), `${key}.md`),
         );
-        // Claimed only once something is written, so a run that writes
-        // nothing leaves no empty directory behind.
+        // Claimed only when an output is about to be written, so a run that
+        // writes nothing leaves no empty directory behind.
         runDir ??= claimRunDir(defaultRunDir(options.cwd, spec, timestamp));
         path = join(await runDir, `${key}.md`);
       }

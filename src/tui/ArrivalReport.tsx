@@ -84,13 +84,7 @@ export function ArrivalReportView({
       {outputLines.map((line, i) => (
         <Text
           key={report.outputs[i]?.key ?? line}
-          color={
-            i >= report.outputs.length || line.startsWith("…")
-              ? "gray"
-              : report.outputs[i]?.written
-                ? "green"
-                : "yellow"
-          }
+          color={line.startsWith("…") ? "gray" : report.outputs[i]?.written ? "green" : "yellow"}
           wrap="truncate-middle"
         >
           {line}

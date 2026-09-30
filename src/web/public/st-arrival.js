@@ -259,6 +259,10 @@
   /** Plain-text receipt + per-step ledger, downloaded as a .txt file. */
   function exportArrivalReport(report, headline) {
     var lines = [headline, "", SteamtrainReducer.formatArrivalReceipt(report.receipt), ""];
+    if (report.outputs && report.outputs.length && SteamtrainReducer.arrivalOutputLines) {
+      lines.push.apply(lines, SteamtrainReducer.arrivalOutputLines(report.outputs, S.project && S.project.cwd));
+      lines.push("");
+    }
     collectArrivalLeafSteps().forEach(function (s) {
       var r = s.result || {};
       var bits = [s.stepId, s.status];
