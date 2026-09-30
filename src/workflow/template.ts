@@ -546,7 +546,10 @@ export function lintTemplateRefs(spec: WorkflowSpec): string[] {
   const literalPaths = new Map<string, string>();
   for (const [name, output] of Object.entries(spec.outputs ?? {})) {
     if (!output.path || output.path.includes("{{")) continue;
-    const normal = output.path.replace(/\\/g, "/").replace(/^(\.\/)+/, "");
+    const normal = output.path
+      .split(/[\\/]/)
+      .filter((segment) => segment !== "" && segment !== ".")
+      .join("/");
     const first = literalPaths.get(normal);
     if (first === undefined) literalPaths.set(normal, name);
     else {

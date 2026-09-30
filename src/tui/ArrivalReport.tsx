@@ -40,7 +40,7 @@ export function ArrivalReportView({
   // Where the workflow's outputs were saved, kept on screen under the body.
   // Fixed chrome: border(2) + kicker/hint(1) + headline(1) + cards(1) + destinations(1),
   // plus one line per output, as many as leave the body one line.
-  const outputLines = fitLines(arrivalOutputLines(report.outputs, cwd), Math.max(1, height - 7));
+  const outputLines = fitLines(arrivalOutputLines(report.outputs, cwd), Math.max(0, height - 7));
   const chrome = 6 + outputLines.length;
   const bodyBudget = Math.max(1, height - chrome);
   const heroLines = wrapOutputLines(report.hero, inner).slice(0, bodyBudget);
@@ -111,6 +111,7 @@ export function ArrivalReportView({
 
 /** At most `max` lines, the last one saying how many more there are when some do not fit. */
 function fitLines(lines: string[], max: number): string[] {
+  if (max <= 0) return [];
   if (lines.length <= max) return lines;
   const shown = lines.slice(0, max - 1);
   return [...shown, `… ${lines.length - shown.length} more (workflow history show)`];

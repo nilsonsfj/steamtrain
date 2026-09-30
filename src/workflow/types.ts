@@ -2105,12 +2105,15 @@ function stepPermissionsError(step: WorkflowStep, declared: PermissionsSpec): st
 }
 
 /**
- * True for a path (as segments) inside `.steamtrain/` other than `.steamtrain/outputs/`:
+ * True for a path (as segments) inside `.steamtrain/` other than under `.steamtrain/outputs/`:
  * the run history, step cache and live-run state, which an output must not replace.
  */
 export function touchesStateDir(segments: readonly string[]): boolean {
-  const [first, second] = segments.filter((segment) => segment !== "" && segment !== ".");
-  return first?.toLowerCase() === ".steamtrain" && second?.toLowerCase() !== "outputs";
+  const [first, second, third] = segments.filter((segment) => segment !== "" && segment !== ".");
+  if (first?.toLowerCase() !== ".steamtrain") return false;
+  // `.steamtrain/outputs` itself is state too: a file there would make every
+  // later default-path output fail, having nothing to make a directory in.
+  return second?.toLowerCase() !== "outputs" || third === undefined;
 }
 
 /**

@@ -519,8 +519,11 @@ async function runOutputs(
   if (!spec.outputs || Object.keys(spec.outputs).length === 0) return undefined;
   if (ctx.workflowCallStack?.length) return undefined;
   const handedOff = "the run was handed to a background runner";
+  // One default directory for every write of this run, the deferred one included.
+  const claimed: { runDir?: Promise<string> } = {};
   const write = (stopWith?: () => string | undefined) =>
     writeWorkflowOutputs(spec, {
+      claimed,
       cwd: deps.cwd,
       startedAt,
       context: { input: ctx.input, inputs: ctx.inputs, outputs: env.outputs, results: env.results },

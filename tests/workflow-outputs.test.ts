@@ -117,6 +117,8 @@ describe("workflow outputs: validation", () => {
     ["a path into .git", ".git/hooks/pre-commit", "must not write into .git"],
     ["the run history", ".steamtrain/history/x.json", "must not write into .steamtrain/"],
     ["the step cache", "./.STEAMTRAIN/cache/x.json", "must not write into .steamtrain/"],
+    ["the outputs directory itself", ".steamtrain/outputs", "must not write into .steamtrain/"],
+    ["the outputs directory, slashed", ".steamtrain/outputs/", "must not write into .steamtrain/"],
     [
       "an inherited property as an input",
       "reports/{{inputs.constructor}}.md",
@@ -163,9 +165,11 @@ describe("workflow outputs: lint of step kind and field", () => {
       report: { value: "{{steps.report.output}}", path: "reports/latest.md" },
       log: { value: "{{steps.check.output}}", path: "./reports/latest.md" },
       other: { value: "{{steps.check.output}}", path: "reports/{{run.timestamp}}.md" },
+      again: { value: "{{steps.check.output}}", path: "reports//latest.md" },
     });
     expect(lintTemplateRefs(spec)).toEqual([
       "outputs 'report' and 'log' both write to './reports/latest.md': the later one overwrites the earlier",
+      "outputs 'report' and 'again' both write to 'reports//latest.md': the later one overwrites the earlier",
     ]);
   });
 
@@ -455,6 +459,38 @@ describe("workflow outputs: writing", () => {
     expect(second[0]?.path).toBe(
       `${(first[0]?.path ?? "").replace(/[/\\]report\.md$/, "")}-2/report.md`,
     );
+  });
+
+  it("writes again into the directory a run already claimed, not a -2 beside it", async () => {
+    const startedAt = Date.now();
+    const claimed = {};
+    const first = await writeWorkflowOutputs(spec(), {
+      cwd: dir,
+      startedAt,
+      context,
+      results,
+      claimed,
+    });
+    const again = await writeWorkflowOutputs(spec(), {
+      cwd: dir,
+      startedAt,
+      context,
+      results,
+      claimed,
+    });
+    expect(again[0]?.path).toBe(first[0]?.path);
+  });
+
+  it("refuses to write a file at .steamtrain/outputs, which would break every later run", async () => {
+    const [report] = await writeWorkflowOutputs(spec(".steamtrain/outputs"), {
+      cwd: dir,
+      startedAt: Date.now(),
+      context,
+      results,
+    });
+    expect(report?.written).toBe(false);
+    expect(report?.error).toContain("refusing to write outside");
+    await expect(readFile(join(dir, ".steamtrain", "outputs"), "utf8")).rejects.toThrow();
   });
 
   it("refuses a spec path that a symlinked directory would carry out", async () => {

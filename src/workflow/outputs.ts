@@ -48,6 +48,12 @@ export interface WriteOutputsOptions {
    * carry on. A hand-off can land while earlier outputs are being written.
    */
   stopWith?: () => string | undefined;
+  /**
+   * The default directory a run has claimed, shared between writes of the same
+   * run: a second write (the outputs a failed hand-off left, say) goes to the
+   * directory the first one made rather than to a `-2` beside it.
+   */
+  claimed?: { runDir?: Promise<string> };
 }
 
 /**
@@ -60,7 +66,7 @@ export async function writeWorkflowOutputs(
   options: WriteOutputsOptions,
 ): Promise<WorkflowOutputResult[]> {
   const timestamp = runTimestamp(new Date(options.startedAt));
-  let runDir: Promise<string> | undefined;
+  const claimed = options.claimed ?? {};
   const all: WorkflowOutputResult[] = [];
   // Outputs on the default path that were not written: the directory they
   // would have gone to is only known once every output has had its turn.
@@ -102,8 +108,8 @@ export async function writeWorkflowOutputs(
         await assertInside(options.cwd, intended);
         // Claimed only when an output is about to be written, so a run that
         // writes nothing leaves no empty directory behind.
-        runDir ??= claimRunDir(defaultRunDir(options.cwd, spec, timestamp));
-        path = join(await runDir, `${key}.md`);
+        claimed.runDir ??= claimRunDir(defaultRunDir(options.cwd, spec, timestamp));
+        path = join(await claimed.runDir, `${key}.md`);
       }
       result.path = path;
       if (held) await assertInside(options.cwd, path);
@@ -124,7 +130,7 @@ export async function writeWorkflowOutputs(
   }
   if (unwrittenDefault.length > 0) {
     const dir =
-      (await runDir?.catch(() => undefined)) ?? defaultRunDir(options.cwd, spec, timestamp);
+      (await claimed.runDir?.catch(() => undefined)) ?? defaultRunDir(options.cwd, spec, timestamp);
     for (const result of unwrittenDefault) result.path = join(dir, `${result.key}.md`);
   }
   return all;
