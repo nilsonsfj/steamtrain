@@ -543,6 +543,10 @@ async function runOutputs(
   const results = await write(() => (isHandingOff() ? handedOff : undefined));
   if (results.some((result) => result.error === handedOff)) {
     ctx.onOutputsDeferred?.(() => write());
+  } else if (isHandingOff()) {
+    // It landed after the last write: everything is already on disk, so if the
+    // hand-off fails there is only the record of it to hand back.
+    ctx.onOutputsDeferred?.(async () => results);
   }
   return results;
 }

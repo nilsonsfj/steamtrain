@@ -492,6 +492,9 @@ export function useWorkflowRunner({
             handoff && handoff.runId === runId && handoff.committed && ac.signal.aborted,
           );
           let handedOff = false;
+          // Set when the hand-off failed: the run then ends here, as an error,
+          // and the terminal save below records why and where its outputs went.
+          let detachFailure: { error: string; outputs?: WorkflowOutputResult[] } | undefined;
           if (handingOff && handoff) {
             handoffRef.current = null;
             let spawned: Awaited<ReturnType<typeof completeHandoff>>;
@@ -535,34 +538,30 @@ export function useWorkflowRunner({
               }
             } else {
               // Handoff failed: completeHandoff already settled the live
-              // meta as errored. Record history so the partial run isn't lost.
-              try {
-                // No runner will write the outputs the engine held back, so write them here.
-                const outputs = await deferredOutputs?.().catch(() => undefined);
-                await historyStoreRef.current.save(
-                  recorder.build({
-                    status: "error",
-                    error: `detach failed: ${spawned.error}`,
-                    outputs,
-                  }),
-                );
-              } catch {
-                // History is best-effort.
-              }
+              // meta as errored. The terminal path below records history so the
+              // partial run isn't lost. No runner will write the outputs the
+              // engine held back, so write them here.
+              detachFailure = {
+                error: `detach failed: ${spawned.error}`,
+                outputs: await deferredOutputs?.().catch(() => undefined),
+              };
               if (mountedRef.current) setWfNotice(`detach failed: ${spawned.error}`);
             }
           }
 
           if (!handedOff) {
-            const status = ac.signal.aborted
-              ? "canceled"
-              : runError || !workflowOk
-                ? "error"
-                : "done";
+            const status = detachFailure
+              ? "error"
+              : ac.signal.aborted
+                ? "canceled"
+                : runError || !workflowOk
+                  ? "error"
+                  : "done";
+            const endError = detachFailure?.error ?? runError;
             // Settle the live-run mirror (flush events, then terminal meta) so
             // cross-UI tailers see the complete stream. Best-effort.
             try {
-              await publisher?.finish(status, { ok: status === "done", error: runError });
+              await publisher?.finish(status, { ok: status === "done", error: endError });
             } catch (err) {
               // Mirroring is best-effort; surface a soft warning so the gap is visible.
               if (mountedRef.current) {
@@ -570,7 +569,9 @@ export function useWorkflowRunner({
               }
             }
             try {
-              await historyStoreRef.current.save(recorder.build({ status, error: runError }));
+              await historyStoreRef.current.save(
+                recorder.build({ status, error: endError, outputs: detachFailure?.outputs }),
+              );
             } catch (err) {
               // History is best-effort; a failed write must not break the run.
               if (mountedRef.current) {
