@@ -249,6 +249,21 @@ export function parseRunOptions(args: string[]): RunOptions | null {
   return options;
 }
 
+/** One message per `--out` key the workflow does not declare as an output. */
+export function undeclaredOutputMessages(
+  name: string,
+  spec: WorkflowSpec,
+  outputPaths: Readonly<Record<string, string>>,
+): string[] {
+  const declared = Object.keys(spec.outputs ?? {});
+  return Object.keys(outputPaths)
+    .filter((key) => !declared.includes(key))
+    .map(
+      (key) =>
+        `--out: '${name}' declares no output '${key}' (outputs: ${declared.join(", ") || "none"})`,
+    );
+}
+
 export async function runWorkflowCommand(
   orchestrator: Orchestrator,
   config: SteamtrainConfig,
@@ -380,16 +395,9 @@ export async function runWorkflowCommand(
     for (const e of resolved.errors) err(`input error: ${e}\n`);
     return 1;
   }
-  const declaredOutputs = Object.keys(spec.outputs ?? {});
-  const unknownOutputs = Object.keys(options.outputPaths).filter(
-    (key) => !declaredOutputs.includes(key),
-  );
-  if (unknownOutputs.length > 0) {
-    for (const key of unknownOutputs) {
-      err(
-        `--out: '${name}' declares no output '${key}' (outputs: ${declaredOutputs.join(", ") || "none"})\n`,
-      );
-    }
+  const undeclared = undeclaredOutputMessages(name, spec, options.outputPaths);
+  if (undeclared.length > 0) {
+    for (const message of undeclared) err(`${message}\n`);
     return 1;
   }
   const outputPaths = Object.keys(options.outputPaths).length > 0 ? options.outputPaths : undefined;

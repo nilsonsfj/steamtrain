@@ -13,10 +13,10 @@ import { type WorkflowSpec, touchesStateDir } from "./types";
  */
 
 /** Where an output with no `path` goes, under the directory the run started in. */
-export const WORKFLOW_OUTPUTS_DIR = `${STEAMTRAIN_STATE_DIR}/outputs`;
+const WORKFLOW_OUTPUTS_DIR = `${STEAMTRAIN_STATE_DIR}/outputs`;
 
 /** `2026-09-27_10-47-12`, in local time: sorts by date and reads at a glance. */
-export function runTimestamp(date: Date): string {
+function runTimestamp(date: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return (
     `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}_` +

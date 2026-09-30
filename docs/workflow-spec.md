@@ -267,7 +267,8 @@ and web UI show the path when the run ends.
   ended (`{{steps.check.ok}}`, `.error`, `.exitCode`) just has to have run,
   so an output can write down a failure:
   `"value": "check failed: {{steps.check.error}}"`. A canceled or timed-out
-  run still writes the outputs whose steps finished. A run being handed to a
+  run still writes the outputs whose steps finished (a run that ends in an
+  engine error, rather than a cancel, records none). A run being handed to a
   background runner writes none (the runner writes them when it finishes the
   run; if the hand-off fails, the run writes them itself and records them),
   and a sub-workflow's run writes none: only the run a person started does.
@@ -289,8 +290,9 @@ and web UI show the path when the run ends.
 - **Per run.** `--out <key>=<path>` sends one output elsewhere for one CLI run
   (once per key).
   That path is yours, so it may be anywhere; a relative one resolves against
-  the directory the run starts in. `--dry-run` ignores `--out`, as it does the
-  other run-only flags: a plan writes nothing. It refuses the flags that only
+  the directory the run starts in. `--dry-run` writes nothing, but still refuses an
+  `--out` the real run would refuse (an undeclared output, a malformed value,
+  the same key twice). It refuses the flags that only
   apply to resuming a run (`--from`, `--retry-failed`, `--step`,
   `--retarget-*`), naming them: a resume has no plan to preview.
 
