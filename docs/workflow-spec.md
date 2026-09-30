@@ -272,6 +272,9 @@ and web UI show the path when the run ends.
   background runner writes none (the runner writes them when it finishes the
   run; if the hand-off fails, the run writes them itself and records them),
   and a sub-workflow's run writes none: only the run a person started does.
+- **Top-level steps only.** A value reads the workflow's own steps by id; a
+  step inside a sub-workflow (`{{steps.call::child.x}}`) is not one, and lints
+  as an unknown step.
 - **Read-only runs still save.** The engine writes the file after the steps
   are done, so a `read-only` workflow (bug-hunt, code-review) keeps its report
   without any step getting write access.

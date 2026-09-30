@@ -2126,6 +2126,9 @@ function outputPathIssue(path: string, spec: WorkflowSpec): string | undefined {
     return `'${path}' must be relative to the directory the run starts in`;
   }
   const segments = path.split(/[\\/]/);
+  if (segments.every((segment) => segment === "" || segment === ".")) {
+    return `'${path}' must name a file`;
+  }
   if (segments.includes("..")) return `'${path}' must not climb out with '..'`;
   if (segments.some((segment) => segment.toLowerCase() === ".git")) {
     return `'${path}' must not write into .git`;

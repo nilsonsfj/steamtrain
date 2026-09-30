@@ -48,10 +48,6 @@ export interface ResolvedWorkspace {
 
 export type DispatchCheck = { ok: true } | { ok: false; reason: string };
 
-/**
- * Routes workspace dispatches to the right adapter + model, gates on doctor
- * health, and streams normalized events for a run.
- */
 /** The knobs of {@link Orchestrator.runWorkflow} that only some callers set. */
 export interface RunWorkflowOptions {
   /**
@@ -67,6 +63,10 @@ export interface RunWorkflowOptions {
   onOutputsDeferred?: (write: () => Promise<WorkflowOutputResult[]>) => void;
 }
 
+/**
+ * Routes workspace dispatches to the right adapter + model, gates on doctor
+ * health, and streams normalized events for a run.
+ */
 export class Orchestrator {
   private readonly workspaceMap: Map<WorkspaceId, WorkspaceEntry>;
   private workflowCatalog: Record<string, WorkflowSpec>;

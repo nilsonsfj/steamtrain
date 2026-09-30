@@ -402,7 +402,7 @@ describe("runCli", () => {
       ]),
     ).toEqual({ isDryRun: true, planArgs: ["t", "--input", "hi"], outs: ["report=r.md"] });
     // Flags that only apply to resuming a run are flagged, not silently dropped:
-    // the real run refuses them without --from --retry-failed.
+    // a dry run plans a workflow by name and does not preview a resume.
     expect(
       splitDryRunArgs([
         "t",
