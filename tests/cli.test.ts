@@ -402,19 +402,34 @@ describe("runCli", () => {
         "claude",
         "--retarget-model",
         "m",
-        "--from",
-        "abc",
         "--out",
         "report=r.md",
         "--dry-run",
       ]),
     ).toEqual({ isDryRun: true, planArgs: ["t", "--input", "hi"] });
+    // A resume has no plan: --from is flagged, not silently dropped.
+    expect(splitDryRunArgs(["--from", "abc", "--input", "x", "--dry-run"])).toEqual({
+      isDryRun: true,
+      planArgs: ["--input", "x"],
+      from: true,
+    });
     // --agent passes THROUGH to the plan so the dry-run preview reflects the
     // re-route the real run would apply (it would otherwise show the blocked agent).
     expect(splitDryRunArgs(["t", "--input", "hi", "--agent", "claude", "--dry-run"])).toEqual({
       isDryRun: true,
       planArgs: ["t", "--input", "hi", "--agent", "claude"],
     });
+  });
+
+  it("explains that a --dry-run cannot preview a --from resume", async () => {
+    const c = capture();
+    const code = await runCli(
+      ["workflow", "run", "--from", "abc", "--input", "x", "--dry-run"],
+      c.io,
+    );
+    expect(code).toBe(1);
+    expect(c.stderr).toContain("--dry-run cannot be combined with --from");
+    expect(c.stderr).not.toContain("usage:");
   });
 
   it("treats flag-looking --input values as text in a --dry-run", async () => {
