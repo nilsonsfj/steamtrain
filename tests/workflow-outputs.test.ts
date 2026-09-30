@@ -157,6 +157,26 @@ describe("workflow outputs: validation", () => {
   });
 });
 
+describe("workflow outputs: lint of step kind and field", () => {
+  it("warns about an output value that would render empty", () => {
+    const spec: WorkflowSpec = {
+      name: "hunt",
+      outputs: {
+        a: { value: "{{steps.report.exitCode}}" },
+        b: { value: "{{steps.report.worktree.branch}}" },
+        c: { value: "{{steps.report.artifacts.log}}" },
+        d: { value: "{{steps.check.exitCode}}" },
+      },
+      phases: reportSpec(undefined).phases,
+    };
+    expect(lintTemplateRefs(spec)).toEqual([
+      "output 'a' references 'report.exitCode' but 'report' is not a command step (exitCode is only available on command steps)",
+      "output 'b' references 'report.worktree.branch' but 'report' does not have workspace isolation",
+      "output 'c' references 'report.artifacts.log' but 'report' has no declared artifacts",
+    ]);
+  });
+});
+
 describe("workflow outputs: a run writes them", () => {
   it("writes an output to the default directory and reports where", async () => {
     const events = await run(reportSpec({ report: { value: "{{steps.report.output}}" } }));
@@ -712,6 +732,12 @@ describe("workflow outputs: the CLI", () => {
 
   it("refuses --out for an output named __proto__", async () => {
     const { code, stderr } = await cli(["--out", "__proto__=x.md"]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("usage:");
+  });
+
+  it.each([["--param"], ["--human"]])("refuses %s for a key named __proto__", async (flag) => {
+    const { code, stderr } = await cli([flag, "__proto__=x"]);
     expect(code).toBe(1);
     expect(stderr).toContain("usage:");
   });
