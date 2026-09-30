@@ -9,6 +9,7 @@ import {
   WORKFLOW_RUNS_DIR,
   type WorkflowDeps,
   type WorkflowEvent,
+  type WorkflowOutputResult,
   type WorkflowSpec,
   createLiveRunStore,
   hashWorkflowSpec,
@@ -69,7 +70,11 @@ function reportSpec(outputs: WorkflowSpec["outputs"], cmd = "true"): WorkflowSpe
 
 async function run(
   spec: WorkflowSpec,
-  ctx: { outputPaths?: Record<string, string>; startedAt?: number } = {},
+  ctx: {
+    outputPaths?: Record<string, string>;
+    startedAt?: number;
+    onOutputsDeferred?: (write: () => Promise<WorkflowOutputResult[]>) => void;
+  } = {},
   extra: Partial<WorkflowDeps> = {},
   signal?: AbortSignal,
 ): Promise<WorkflowEvent[]> {
@@ -110,12 +115,23 @@ describe("workflow outputs: validation", () => {
     ["a Windows drive path", "C:\\reports\\x.md", "must be relative"],
     ["a path that climbs out", "reports/../../x.md", "must not climb out"],
     ["a path into .git", ".git/hooks/pre-commit", "must not write into .git"],
+    ["the run history", ".steamtrain/history/x.json", "must not write into .steamtrain/"],
+    ["the step cache", "./.STEAMTRAIN/cache/x.json", "must not write into .steamtrain/"],
+    [
+      "an inherited property as an input",
+      "reports/{{inputs.constructor}}.md",
+      "uses '{{inputs.constructor}}'",
+    ],
     ["a step placeholder", "reports/{{steps.report.output}}.md", "uses '{{steps.report.output}}'"],
     ["an undeclared input", "reports/{{inputs.nope}}.md", "uses '{{inputs.nope}}'"],
   ])("rejects %s", (_name, path, message) => {
     const result = withOutput({ value: "x", path });
     expect(result.ok).toBe(false);
     expect(result.ok ? "" : result.error).toContain(message);
+  });
+
+  it("allows a path under .steamtrain/outputs", () => {
+    expect(withOutput({ value: "x", path: ".steamtrain/outputs/mine/report.md" }).ok).toBe(true);
   });
 
   it("rejects an output name that is not an identifier, and an empty value", () => {
@@ -279,6 +295,55 @@ describe("workflow outputs: a run writes them", () => {
     await expect(readdir(join(dir, ".steamtrain"))).rejects.toThrow();
   });
 
+  it("stops writing when a hand-off lands part way through", async () => {
+    const two = reportSpec({
+      first: { value: "{{steps.report.output}}", path: "out/first.md" },
+      second: { value: "{{steps.report.output}}", path: "out/second.md" },
+    });
+    // The hand-off lands after the first output has been written.
+    let asked = 0;
+    const results = await writeWorkflowOutputs(two, {
+      cwd: dir,
+      startedAt: Date.now(),
+      context: { input: "x", outputs: new Map([["report", "body"]]) },
+      results: new Map([["report", { ok: true }]]),
+      stopWith: () => (++asked > 1 ? "the run was handed to a background runner" : undefined),
+    });
+    expect(results.map((o) => [o.key, o.written])).toEqual([
+      ["first", true],
+      ["second", false],
+    ]);
+    expect(results[1]?.error).toBe("the run was handed to a background runner");
+    await expect(readFile(join(dir, "out", "second.md"), "utf8")).rejects.toThrow();
+  });
+
+  it("offers a skipped run's outputs back, to write if the hand-off fails", async () => {
+    const ac = new AbortController();
+    const deferred: Array<() => Promise<WorkflowOutputResult[]>> = [];
+    const spec = reportSpec({
+      report: { value: "{{steps.report.output}}", path: "out/report.md" },
+    });
+    const events: WorkflowEvent[] = [];
+    for await (const event of runWorkflow(
+      spec,
+      { input: "the parser", onOutputsDeferred: (write) => deferred.push(write) },
+      deps(),
+      ac.signal,
+    )) {
+      events.push(event);
+      // The hand-off lands once every step has finished, just before the outputs.
+      if (event.kind === "step_done" && event.result.stepId === "report") {
+        ac.abort(RUN_HANDOFF_ABORT);
+      }
+    }
+    expect(done(events).outputs?.[0]).toMatchObject({ written: false });
+    await expect(readFile(join(dir, "out", "report.md"), "utf8")).rejects.toThrow();
+    expect(deferred).toHaveLength(1);
+    const written = await deferred[0]?.();
+    expect(written?.[0]).toMatchObject({ written: true });
+    expect(await readFile(join(dir, "out", "report.md"), "utf8")).toBe("Findings for the parser\n");
+  });
+
   it("names the directory for the start the run was given, not for now", async () => {
     const startedAt = new Date(2026, 0, 2, 3, 4, 5).getTime();
     const events = await run(reportSpec({ report: { value: "{{steps.report.output}}" } }), {
@@ -351,6 +416,69 @@ describe("workflow outputs: writing", () => {
       expect(report?.written).toBe(false);
       expect(report?.error).toContain("refusing to write outside");
       expect(await readdir(outside)).toEqual([]);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a spec path into .steamtrain, even through a placeholder", async () => {
+    await mkdir(join(dir, ".steamtrain", "history"), { recursive: true });
+    const [direct] = await writeWorkflowOutputs(spec(".steamtrain/history/x.json"), {
+      cwd: dir,
+      startedAt: Date.now(),
+      context,
+      results,
+    });
+    expect(direct).toMatchObject({ written: false });
+    expect(direct?.error).toContain("refusing to write outside");
+    const templated: WorkflowSpec = {
+      name: "hunt",
+      inputs: { where: { default: ".steamtrain" } },
+      outputs: {
+        report: { value: "{{steps.report.output}}", path: "{{inputs.where}}/history/x.json" },
+      },
+      phases: [],
+    };
+    const [viaInput] = await writeWorkflowOutputs(templated, {
+      cwd: dir,
+      startedAt: Date.now(),
+      context: { ...context, inputs: { where: ".steamtrain" } },
+      results,
+    });
+    expect(viaInput?.written).toBe(false);
+    expect(await readdir(join(dir, ".steamtrain", "history"))).toEqual([]);
+  });
+
+  it("does not read an inherited property as an input when it names the path", async () => {
+    const templated: WorkflowSpec = {
+      name: "hunt",
+      outputs: {
+        report: { value: "{{steps.report.output}}", path: "out/{{inputs.constructor}}.md" },
+      },
+      phases: [],
+    };
+    const [report] = await writeWorkflowOutputs(templated, {
+      cwd: dir,
+      startedAt: Date.now(),
+      context: { ...context, inputs: {} },
+      results,
+    });
+    expect(relative(dir, report?.path ?? "")).toBe(join("out", "_.md"));
+  });
+
+  it("says where a refused default output was meant to go", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "steamtrain-outputs-outside-"));
+    try {
+      await mkdir(join(dir, ".steamtrain"));
+      await symlink(outside, join(dir, ".steamtrain", "outputs"));
+      const [report] = await writeWorkflowOutputs(spec(), {
+        cwd: dir,
+        startedAt: Date.now(),
+        context,
+        results,
+      });
+      expect(report?.written).toBe(false);
+      expect(relative(dir, report?.path ?? "")).toMatch(/report\.md$/);
     } finally {
       await rm(outside, { recursive: true, force: true });
     }

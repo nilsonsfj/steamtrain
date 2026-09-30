@@ -367,9 +367,11 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
       // treated as text, never as a flag.
       const dryRun = splitDryRunArgs(rest);
       if (dryRun.isDryRun) {
-        if (dryRun.from) {
-          // A resume re-runs a recorded run; it is not a workflow and input to plan.
-          err("--dry-run cannot be combined with --from: a resume has no plan to preview\n");
+        if (dryRun.resumeFlags) {
+          // These only apply to resuming a recorded run, which has no plan to preview.
+          err(
+            `--dry-run cannot be combined with ${dryRun.resumeFlags.join(", ")}: they only apply to resuming a run (--from <runId> --retry-failed), which has no plan to preview\n`,
+          );
           return 1;
         }
         return planCommand(orchestrator, dryRun.planArgs, io, out, err);
@@ -494,8 +496,12 @@ interface PlanOptions {
 export function splitDryRunArgs(args: string[]): {
   isDryRun: boolean;
   planArgs: string[];
-  /** Set when `--from` was given: a resume has no plan to preview. */
-  from?: true;
+  /**
+   * Flags that only apply to resuming a recorded run (`--from`, `--retry-failed`
+   * and the `--step` / `--retarget-*` that narrow one). A resume has no plan to
+   * preview, and dropping them would approve a command line the real run refuses.
+   */
+  resumeFlags?: string[];
 } {
   const valueTaking = new Set([
     "--input",
@@ -525,28 +531,25 @@ export function splitDryRunArgs(args: string[]): {
     "-o",
     "--out",
     "--human",
+  ]);
+  const resumeOnly = new Set([
+    "--from",
     "--step",
     "--retarget-agent",
     "--retarget-model",
-  ]);
-  const dropBare = new Set([
-    "--dry-run",
-    "--fresh",
-    "--detach",
-    "-d",
-    "--approve-all",
     "--retry-failed",
   ]);
+  const dropBare = new Set(["--dry-run", "--fresh", "--detach", "-d", "--approve-all"]);
   let isDryRun = false;
-  let from = false;
+  const resumeFlags: string[] = [];
   const planArgs: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === undefined) continue;
     if (valueTaking.has(arg)) {
       const value = args[i + 1];
-      if (arg === "--from") from = true;
-      if (!dropWithValue.has(arg) && arg !== "--from") {
+      if (resumeOnly.has(arg)) resumeFlags.push(arg);
+      else if (!dropWithValue.has(arg)) {
         planArgs.push(arg);
         if (value !== undefined) planArgs.push(value);
       }
@@ -557,10 +560,14 @@ export function splitDryRunArgs(args: string[]): {
       isDryRun = true;
       continue;
     }
+    if (arg === "--retry-failed") {
+      resumeFlags.push(arg);
+      continue;
+    }
     if (dropBare.has(arg)) continue;
     planArgs.push(arg);
   }
-  return from ? { isDryRun, planArgs, from: true } : { isDryRun, planArgs };
+  return resumeFlags.length > 0 ? { isDryRun, planArgs, resumeFlags } : { isDryRun, planArgs };
 }
 
 function parsePlanOptions(args: string[]): PlanOptions | null {

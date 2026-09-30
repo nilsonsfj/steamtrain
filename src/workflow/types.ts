@@ -6,7 +6,12 @@ import {
   type PermissionsSpec,
 } from "../agents/permissions";
 import type { AgentInstanceId, ApiInstanceId, TokenUsage } from "../types/events";
-import { type WorkflowInputType, isStringLikeInputType, workflowInputType } from "./input-params";
+import {
+  IDENTIFIER_RE,
+  type WorkflowInputType,
+  isStringLikeInputType,
+  workflowInputType,
+} from "./input-params";
 import type { ModelFailoverPolicy } from "./model-failover";
 import type { RetryPolicy } from "./retry";
 import {
@@ -2100,6 +2105,15 @@ function stepPermissionsError(step: WorkflowStep, declared: PermissionsSpec): st
 }
 
 /**
+ * True for a path (as segments) inside `.steamtrain/` other than `.steamtrain/outputs/`:
+ * the run history, step cache and live-run state, which an output must not replace.
+ */
+export function touchesStateDir(segments: readonly string[]): boolean {
+  const [first, second] = segments.filter((segment) => segment !== "" && segment !== ".");
+  return first?.toLowerCase() === ".steamtrain" && second?.toLowerCase() !== "outputs";
+}
+
+/**
  * Why an output's `path` template can never be written safely, or undefined.
  * The rendered path is checked again when the run ends; this catches what is
  * wrong with the template itself, before anything runs.
@@ -2113,10 +2127,13 @@ function outputPathIssue(path: string, spec: WorkflowSpec): string | undefined {
   if (segments.some((segment) => segment.toLowerCase() === ".git")) {
     return `'${path}' must not write into .git`;
   }
+  if (touchesStateDir(segments)) {
+    return `'${path}' must not write into .steamtrain/ (only .steamtrain/outputs/): that is where the run history and step cache live`;
+  }
   for (const match of path.matchAll(PLACEHOLDER)) {
     const expr = match[1] as string;
     if (expr === "workflow" || expr === "run.timestamp") continue;
-    if (expr.startsWith("inputs.") && spec.inputs?.[expr.slice(7)]) continue;
+    if (expr.startsWith("inputs.") && Object.hasOwn(spec.inputs ?? {}, expr.slice(7))) continue;
     return `uses '{{${expr}}}' (a path may use {{workflow}}, {{run.timestamp}} and declared {{inputs.<key>}})`;
   }
   return undefined;
@@ -2130,7 +2147,7 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
 
   if (spec.inputs) {
     for (const [name, input] of Object.entries(spec.inputs)) {
-      if (!/^[a-zA-Z_][a-zA-Z0-9_-]*$/.test(name)) {
+      if (!IDENTIFIER_RE.test(name)) {
         return {
           ok: false,
           error: `input name '${name}' is not a valid identifier (use letters, digits, underscores, hyphens; must start with a letter or underscore)`,
@@ -2196,7 +2213,7 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
   }
 
   for (const [name, output] of Object.entries(spec.outputs ?? {})) {
-    if (!/^[a-zA-Z_][a-zA-Z0-9_-]*$/.test(name)) {
+    if (!IDENTIFIER_RE.test(name)) {
       return {
         ok: false,
         error: `output name '${name}' is not a valid identifier (use letters, digits, underscores, hyphens; must start with a letter or underscore)`,

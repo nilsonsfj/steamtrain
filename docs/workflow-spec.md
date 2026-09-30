@@ -269,16 +269,20 @@ and web UI show the path when the run ends.
   `"value": "check failed: {{steps.check.error}}"`. A canceled or timed-out
   run still writes the outputs whose steps finished. A run being handed to a
   background runner writes none (the runner writes them when it finishes the
-  run), and a sub-workflow's run writes none: only the run a person started
-  does.
+  run; if the hand-off fails, the run writes them itself and records them),
+  and a sub-workflow's run writes none: only the run a person started does.
 - **Read-only runs still save.** The engine writes the file after the steps
   are done, so a `read-only` workflow (bug-hunt, code-review) keeps its report
   without any step getting write access.
 - **Where it may go.** A spec's `path`, and the default
   `.steamtrain/outputs/` directory, must stay inside the directory the run
-  started in, and out of `.git`: they are checked before and after following
-  symlinks, so a repository that makes either a link to somewhere else cannot
-  carry the file out (use `--out` to write there on purpose). An input value
+  started in, out of `.git`, and out of `.steamtrain/` other than
+  `.steamtrain/outputs/` (the run history and step cache live there): they are
+  checked before and after following symlinks, so a repository that makes
+  either a link to somewhere else cannot carry the file out (use `--out` to
+  write there on purpose). Beyond that, a spec path may replace any file in the
+  project, a tracked one included: that is how a report is kept up to date in
+  the repository, so review an `outputs` path in a spec you did not write. An input value
   fills one path segment at most. Two runs that start in the same second get
   separate default directories. The directory is named for when the run
   started, and a run handed to a background runner keeps its original start.
@@ -286,7 +290,9 @@ and web UI show the path when the run ends.
   (once per key).
   That path is yours, so it may be anywhere; a relative one resolves against
   the directory the run starts in. `--dry-run` ignores `--out`, as it does the
-  other run-only flags: a plan writes nothing.
+  other run-only flags: a plan writes nothing. It refuses the flags that only
+  apply to resuming a run (`--from`, `--retry-failed`, `--step`,
+  `--retarget-*`), which the real run refuses without `--from --retry-failed`.
 
 Output files are kept. History keeps only the latest runs, and
 `workflow history clear` deletes the records, but neither removes the files
@@ -1852,8 +1858,8 @@ catches steamtrain-specific references that will silently render as empty.
 - Input names must be identifiers (`[a-zA-Z_][a-zA-Z0-9_-]*`). `type: "enum"`
   requires `choices`. `fallbackModels` is only valid on `type: "model"`.
 - Output names must be identifiers (`[a-zA-Z_][a-zA-Z0-9_-]*`) and `value` must
-  not be empty. An output `path` must be relative, may not contain `..` or a
-  `.git` segment, and may use only the `{{workflow}}`, `{{run.timestamp}}` and
+  not be empty. An output `path` must be relative, may not contain `..`, a
+  `.git` segment, or `.steamtrain/` other than `.steamtrain/outputs/`, and may use only the `{{workflow}}`, `{{run.timestamp}}` and
   declared `{{inputs.<key>}}` placeholders.
 
 ### Template validation

@@ -11,6 +11,7 @@ import type {
   NarrationLine,
   StepEditPatch,
   StepResult,
+  WorkflowOutputResult,
   WorkflowRunControl,
   WorkflowSpec,
 } from "../workflow";
@@ -295,6 +296,8 @@ export function useWorkflowRunner({
         });
         let runError: string | undefined;
         let workflowOk = true;
+        // Offered by the engine when it skips the outputs for a hand-off.
+        let deferredOutputs: (() => Promise<WorkflowOutputResult[]>) | undefined;
         let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
         let publisher: LiveRunPublisher | undefined;
         let disposeCancelWatch: (() => void) | undefined;
@@ -434,6 +437,11 @@ export function useWorkflowRunner({
             withStoreApprovals(liveStore, runId, approvalProvider),
             control,
             withStoreHumanInputs(liveStore, runId, humanInputProvider),
+            {
+              onOutputsDeferred: (write) => {
+                deferredOutputs = write;
+              },
+            },
           )) {
             // Mid-run detach: once ownership transfer is committed, stop
             // feeding events into the local view,
@@ -529,8 +537,14 @@ export function useWorkflowRunner({
               // Handoff failed: completeHandoff already settled the live
               // meta as errored. Record history so the partial run isn't lost.
               try {
+                // No runner will write the outputs the engine held back, so write them here.
+                const outputs = await deferredOutputs?.().catch(() => undefined);
                 await historyStoreRef.current.save(
-                  recorder.build({ status: "error", error: `detach failed: ${spawned.error}` }),
+                  recorder.build({
+                    status: "error",
+                    error: `detach failed: ${spawned.error}`,
+                    outputs,
+                  }),
                 );
               } catch {
                 // History is best-effort.

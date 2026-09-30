@@ -273,6 +273,12 @@ export interface WorkflowRunContext {
    * where its history record says.
    */
   startedAt?: number;
+  /**
+   * Offered when the run skipped its outputs because it was being handed to a
+   * background runner: call it to write them here instead, if that hand-off
+   * then fails and no runner will.
+   */
+  onOutputsDeferred?: (write: () => Promise<WorkflowOutputResult[]>) => void;
 }
 
 /**
@@ -512,21 +518,33 @@ async function runOutputs(
   const { spec, ctx, deps, signal } = env;
   if (!spec.outputs || Object.keys(spec.outputs).length === 0) return undefined;
   if (ctx.workflowCallStack?.length) return undefined;
-  if (signal?.aborted && signal.reason === RUN_HANDOFF_ABORT) {
+  const handedOff = "the run was handed to a background runner";
+  const write = (stopWith?: () => string | undefined) =>
+    writeWorkflowOutputs(spec, {
+      cwd: deps.cwd,
+      startedAt,
+      context: { input: ctx.input, inputs: ctx.inputs, outputs: env.outputs, results: env.results },
+      results: env.results,
+      paths: ctx.outputPaths,
+      stopWith,
+    });
+  const isHandingOff = () => Boolean(signal?.aborted && signal.reason === RUN_HANDOFF_ABORT);
+  if (isHandingOff()) {
+    ctx.onOutputsDeferred?.(() => write());
     return Object.entries(spec.outputs).map(([key, output]) => ({
       key,
       ...(output.description ? { description: output.description } : {}),
       written: false,
-      error: "the run was handed to a background runner",
+      error: handedOff,
     }));
   }
-  return writeWorkflowOutputs(spec, {
-    cwd: deps.cwd,
-    startedAt,
-    context: { input: ctx.input, inputs: ctx.inputs, outputs: env.outputs, results: env.results },
-    results: env.results,
-    paths: ctx.outputPaths,
-  });
+  // The hand-off can also land while the outputs are being written; the ones
+  // not yet written are then left to the runner, and offered back if it fails.
+  const results = await write(() => (isHandingOff() ? handedOff : undefined));
+  if (results.some((result) => result.error === handedOff)) {
+    ctx.onOutputsDeferred?.(() => write());
+  }
+  return results;
 }
 
 /** Sum leaf-step cost across cached results, so a resumed run counts prior spend. */
