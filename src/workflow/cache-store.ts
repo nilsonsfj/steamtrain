@@ -84,8 +84,8 @@ export function hashWorkflowCacheInput(input: string): string {
  * away the steps' cached work (or downgrade a `--from` re-run) when it is.
  */
 export function hashWorkflowSpec(spec: WorkflowSpec): string {
-  const { outputs: _outputs, ...steps } = spec;
-  return createHash("sha256").update(stableStringify(steps)).digest("hex");
+  const { outputs: _outputs, ...rest } = spec;
+  return createHash("sha256").update(stableStringify(rest)).digest("hex");
 }
 
 export function workflowCacheFileName(key: WorkflowCacheKey): string {

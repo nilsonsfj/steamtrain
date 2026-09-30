@@ -263,7 +263,7 @@ export async function runWorkflowCommand(
   if (!options) {
     err(
       `usage: steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--agent <id>] [--approve-all | --on-approval fail|stop] [--human <stepId>=<value|@file> ...] [--out <output>=<path> ...] [--report json|markdown|junit [--output <file>]]
-       steamtrain workflow run --from <runId> [--retry-failed] [--retarget-agent <id> [--retarget-model <id>]] [--step <id> ...] [--json] [--detach]
+       steamtrain workflow run --from <runId> [--retry-failed] [--retarget-agent <id> [--retarget-model <id>]] [--step <id> ...] [--out <output>=<path> ...] [--json] [--detach]
 `,
     );
     return 1;

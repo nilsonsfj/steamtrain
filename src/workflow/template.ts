@@ -538,6 +538,21 @@ export function lintTemplateRefs(spec: WorkflowSpec): string[] {
     }
   }
 
+  // Two outputs with the same literal path overwrite each other; a templated
+  // path cannot be compared before the run, so only literals are.
+  const literalPaths = new Map<string, string>();
+  for (const [name, output] of Object.entries(spec.outputs ?? {})) {
+    if (!output.path || output.path.includes("{{")) continue;
+    const normal = output.path.replace(/\\/g, "/").replace(/^(\.\/)+/, "");
+    const first = literalPaths.get(normal);
+    if (first === undefined) literalPaths.set(normal, name);
+    else {
+      warnings.push(
+        `outputs '${first}' and '${name}' both write to '${output.path}': the later one overwrites the earlier`,
+      );
+    }
+  }
+
   // Outputs render once, after every step, so they have no item or loop pass.
   for (const [name, output] of Object.entries(spec.outputs ?? {})) {
     for (const ref of extractRefs(output.value)) {
