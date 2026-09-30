@@ -553,6 +553,31 @@ export function lintTemplateRefs(spec: WorkflowSpec): string[] {
           warnings.push(`output '${name}' uses invalid template reference '{{${ref}}}'`);
         } else if (!stepIds.has(id)) {
           warnings.push(`output '${name}' references unknown step '${id}'`);
+        } else {
+          // The kind and field checks prompts get too: a value that would render empty.
+          const refStep = findStep(spec, id);
+          const field = STEP_FIELD.exec(ref);
+          const worktree = STEP_WORKTREE_FIELD.exec(ref);
+          const artifact = STEP_ARTIFACT_FIELD.exec(ref);
+          if (field?.[2] === "exitCode") {
+            if (refStep && !isCommandStep(refStep)) {
+              warnings.push(
+                `output '${name}' references '${id}.exitCode' but '${id}' is not a command step (exitCode is only available on command steps)`,
+              );
+            }
+          } else if (!field && worktree) {
+            if (refStep && !hasWorkspace(refStep)) {
+              warnings.push(
+                `output '${name}' references '${id}.worktree.${worktree[2]}' but '${id}' does not have workspace isolation`,
+              );
+            }
+          } else if (!field && artifact) {
+            if (refStep && !hasArtifacts(refStep)) {
+              warnings.push(
+                `output '${name}' references '${id}.artifacts.${artifact[2]}' but '${id}' has no declared artifacts`,
+              );
+            }
+          }
         }
       }
     }

@@ -585,7 +585,8 @@ function parsePlanOptions(args: string[]): PlanOptions | null {
       const eq = value.indexOf("=");
       if (eq < 1) return null;
       const key = value.slice(0, eq);
-      if (key.startsWith("-")) return null;
+      // `__proto__` would be swallowed by the object's own setter, not stored.
+      if (key.startsWith("-") || key === "__proto__") return null;
       options.params[key] = value.slice(eq + 1);
       i += 1;
     } else if (arg === "--stdin") {
@@ -2111,7 +2112,8 @@ function parseCacheClearOptions(args: string[]): CacheClearOptions | null {
       const eq = value.indexOf("=");
       if (eq < 1) return null;
       const key = value.slice(0, eq);
-      if (key.startsWith("-")) return null;
+      // `__proto__` would be swallowed by the object's own setter, not stored.
+      if (key.startsWith("-") || key === "__proto__") return null;
       options.params[key] = value.slice(eq + 1);
       i += 1;
     } else if (arg === "--stdin") {
