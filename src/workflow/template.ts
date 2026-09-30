@@ -541,11 +541,12 @@ export function lintTemplateRefs(spec: WorkflowSpec): string[] {
     }
   }
 
-  // Two outputs with the same literal path overwrite each other; a templated
-  // path cannot be compared before the run, so only literals are.
+  // Two outputs with the same path overwrite each other. Identical strings,
+  // placeholders and all, render to one file in a run; two different templates
+  // that happen to collide cannot be known before it.
   const literalPaths = new Map<string, string>();
   for (const [name, output] of Object.entries(spec.outputs ?? {})) {
-    if (!output.path || output.path.includes("{{")) continue;
+    if (!output.path) continue;
     const normal = output.path
       .split(/[\\/]/)
       .filter((segment) => segment !== "" && segment !== ".")

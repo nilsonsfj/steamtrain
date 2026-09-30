@@ -709,6 +709,42 @@ describe("finished-run page: saved outputs", () => {
     expect(rows[1]?.getAttribute("title")).toBe("The log");
   });
 
+  it("puts the output lines in the exported report", () => {
+    const state = runState([
+      start(1),
+      ...phase("build", 0),
+      ...step("build", "build", { ok: true }),
+      {
+        kind: "workflow_done",
+        ok: true,
+        results: [],
+        outputs: [
+          { key: "report", written: true, path: "/work/app/out/report.md" },
+          { key: "log", written: false, error: "step 'check' failed" },
+        ],
+        ts: at(),
+      },
+    ]);
+    const page = mount({ state, runStatus: "done", project: { cwd: "/work/app" } });
+    let exported: Blob | undefined;
+    const create = vi.spyOn(URL, "createObjectURL").mockImplementation((blob) => {
+      exported = blob as Blob;
+      return "blob:export";
+    });
+    const revoke = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    try {
+      click(page.button("Export"));
+    } finally {
+      create.mockRestore();
+      revoke.mockRestore();
+    }
+    expect(exported).toBeDefined();
+    return exported?.text().then((text) => {
+      expect(text).toContain("saved report → out/report.md");
+      expect(text).toContain("not saved log: step 'check' failed");
+    });
+  });
+
   it("shows no Saved box for a workflow that declares no outputs", () => {
     const page = mount({ state: cleanRun(), runStatus: "done" });
     expect(byClass(page.page(), "arrival-outputs")).toHaveLength(0);
