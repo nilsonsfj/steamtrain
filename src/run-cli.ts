@@ -230,7 +230,10 @@ export function parseRunOptions(args: string[]): RunOptions | null {
       const eq = value.indexOf("=");
       if (eq < 1 || eq === value.length - 1) return null;
       const key = value.slice(0, eq);
-      if (key.startsWith("-") || Object.hasOwn(options.outputPaths, key)) return null;
+      // `__proto__` would be swallowed by the object's own setter, not stored.
+      if (key.startsWith("-") || key === "__proto__" || Object.hasOwn(options.outputPaths, key)) {
+        return null;
+      }
       options.outputPaths[key] = value.slice(eq + 1);
       i += 1;
     } else {
@@ -1175,7 +1178,7 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<Drive
         budgetExceeded = Boolean(event.budgetExceeded);
         if (!options.json) {
           printRunSummary(event.results, out, stepMetaFromSpec(spec));
-          printRunOutputs(event.outputs, cwd, out);
+          printRunOutputs(event.outputs, cwd, out, err);
         }
       }
     }
@@ -1331,7 +1334,7 @@ export async function runAttachCommand(
     printHumanEvent(done, out, { canceled: final.status === "canceled" && !timedOut, timedOut });
     if (done.kind === "workflow_done") {
       printRunSummary(done.results, out, stepMeta);
-      printRunOutputs(done.outputs, meta.cwd, out);
+      printRunOutputs(done.outputs, meta.cwd, out, err);
     }
   }
   if (json) {
@@ -2071,16 +2074,29 @@ export function printHumanEvent(
 
 /**
  * Where the run's declared outputs went: the answer to "where is the report?"
- * printed last, so it is the line left on screen when the run ends.
+ * printed last, so it is the line left on screen when the run ends. An output
+ * that was not saved is a warning on stderr instead, as a `--report` that
+ * cannot be written is: a script that discards stdout, or only watches stderr
+ * for trouble, still learns that the deliverable is missing. The exit code is
+ * the run's own, as it is for `--report`.
  */
 export function printRunOutputs(
   outputs: readonly WorkflowOutputResult[] | undefined,
   cwd: string,
   out: (text: string) => void,
+  err: (text: string) => void,
 ): void {
   if (!outputs?.length) return;
-  out("\noutputs\n");
-  for (const line of arrivalOutputLines(outputs, cwd)) out(`  ${line}\n`);
+  const lines = arrivalOutputLines(outputs, cwd);
+  if (outputs.some((output) => output.written)) {
+    out("\noutputs\n");
+    outputs.forEach((output, i) => {
+      if (output.written) out(`  ${lines[i]}\n`);
+    });
+  }
+  outputs.forEach((output, i) => {
+    if (!output.written) err(`warning: ${lines[i]}\n`);
+  });
 }
 
 /**

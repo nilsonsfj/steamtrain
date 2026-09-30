@@ -565,9 +565,19 @@ describe("workflow outputs: the CLI", () => {
 
   it("leaves no temp file behind when --out names a directory", async () => {
     await mkdir(join(dir, "reports"));
-    const { stdout } = await cli(["--out", "report=reports"]);
-    expect(stdout).toContain("not saved report:");
+    const { code, stdout, stderr } = await cli(["--out", "report=reports"]);
     expect(await readdir(dir)).not.toContainEqual(expect.stringMatching(/\.tmp$/));
+    // The run itself succeeded, so the exit code says so; the missing report is a
+    // warning on stderr, where a script discarding stdout still sees it.
+    expect(code).toBe(0);
+    expect(stderr).toContain("warning: not saved report:");
+    expect(stdout).not.toContain("not saved");
+  });
+
+  it("refuses --out for an output named __proto__", async () => {
+    const { code, stderr } = await cli(["--out", "__proto__=x.md"]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("usage:");
   });
 
   it("refuses --out for an output the workflow does not declare", async () => {

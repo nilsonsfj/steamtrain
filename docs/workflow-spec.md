@@ -261,7 +261,8 @@ and web UI show the path when the run ends.
 ```
 
 - **When it is written.** An output is written only when every step its
-  `value` reads finished ok. Otherwise it is recorded as not saved, with the
+  `value` reads finished ok. Otherwise it is recorded as not saved (a warning
+  on stderr, the run's exit code unchanged, as for `--report`), with the
   step that stopped it (`step 'report' failed`). A step read only for how it
   ended (`{{steps.check.ok}}`, `.error`, `.exitCode`) just has to have run,
   so an output can write down a failure:
