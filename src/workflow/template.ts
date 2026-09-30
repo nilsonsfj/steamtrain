@@ -254,30 +254,33 @@ function extractRefs(text: string | undefined): string[] {
 }
 
 /**
- * The step a `steps.…` reference reads, tried in the same order
- * {@link resolveTemplateValue} resolves them (the order is load-bearing: see
- * `STEP_FIELD`), or undefined when the reference names no step.
- */
-function referencedStepId(ref: string): string | undefined {
-  return referencedStep(ref)?.id;
-}
-
-/**
  * The step a `steps.…` reference reads, and whether it reads only how the step
  * ended (`ok`, `error`, `exitCode`) rather than what it made. Judged by which
  * pattern matched, in the order that matters: `steps.x.json.ok` is a field of
- * the step's JSON, not its `ok`.
+ * the step's JSON, not its `ok`. `kind` says which pattern that was, and
+ * `field` what it named, so a caller never re-classifies in a different order.
  */
-function referencedStep(ref: string): { id: string; status: boolean } | undefined {
-  for (const pattern of [STEP_WORKTREE_FIELD, STEP_ARTIFACT_FIELD, STEP_JSON_FIELD]) {
+function referencedStep(
+  ref: string,
+):
+  | { id: string; status: boolean; kind: "worktree" | "artifact" | "json" | "field"; field: string }
+  | undefined {
+  const specific = [
+    [STEP_WORKTREE_FIELD, "worktree"],
+    [STEP_ARTIFACT_FIELD, "artifact"],
+    [STEP_JSON_FIELD, "json"],
+  ] as const;
+  for (const [pattern, kind] of specific) {
     const match = pattern.exec(ref);
-    if (match) return { id: match[1] as string, status: false };
+    if (match) return { id: match[1] as string, status: false, kind, field: match[2] ?? "" };
   }
   const match = STEP_FIELD.exec(ref);
   if (!match) return undefined;
   return {
     id: match[1] as string,
     status: ["ok", "error", "exitCode"].includes(match[2] as string),
+    kind: "field",
+    field: match[2] as string,
   };
 }
 
@@ -563,33 +566,33 @@ export function lintTemplateRefs(spec: WorkflowSpec): string[] {
       } else if (ref === "item" || ref.startsWith("item.") || ref === "iteration") {
         warnings.push(`output '${name}' uses '{{${ref}}}', which has no value once the run ends`);
       } else if (ref.startsWith("steps.")) {
-        const id = referencedStepId(ref);
-        if (id === undefined) {
+        const read = referencedStep(ref);
+        if (read === undefined) {
           warnings.push(`output '${name}' uses invalid template reference '{{${ref}}}'`);
-        } else if (!stepIds.has(id)) {
-          warnings.push(`output '${name}' references unknown step '${id}'`);
+        } else if (!stepIds.has(read.id)) {
+          warnings.push(`output '${name}' references unknown step '${read.id}'`);
         } else {
-          // The kind and field checks prompts get too: a value that would render empty.
+          // The kind and field checks prompts get too: a value that would render
+          // empty. The pattern that named the step decides the field, so
+          // `steps.a.json.exitCode` is JSON, not an `exitCode`.
+          const { id } = read;
           const refStep = findStep(spec, id);
-          const field = STEP_FIELD.exec(ref);
-          const worktree = STEP_WORKTREE_FIELD.exec(ref);
-          const artifact = STEP_ARTIFACT_FIELD.exec(ref);
-          if (field?.[2] === "exitCode") {
+          if (read.kind === "field" && read.field === "exitCode") {
             if (refStep && !isCommandStep(refStep)) {
               warnings.push(
                 `output '${name}' references '${id}.exitCode' but '${id}' is not a command step (exitCode is only available on command steps)`,
               );
             }
-          } else if (!field && worktree) {
+          } else if (read.kind === "worktree") {
             if (refStep && !hasWorkspace(refStep)) {
               warnings.push(
-                `output '${name}' references '${id}.worktree.${worktree[2]}' but '${id}' does not have workspace isolation`,
+                `output '${name}' references '${id}.worktree.${read.field}' but '${id}' does not have workspace isolation`,
               );
             }
-          } else if (!field && artifact) {
+          } else if (read.kind === "artifact") {
             if (refStep && !hasArtifacts(refStep)) {
               warnings.push(
-                `output '${name}' references '${id}.artifacts.${artifact[2]}' but '${id}' has no declared artifacts`,
+                `output '${name}' references '${id}.artifacts.${read.field}' but '${id}' has no declared artifacts`,
               );
             }
           }

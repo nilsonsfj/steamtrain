@@ -184,6 +184,21 @@ describe("parseSharePayload", () => {
 });
 
 describe("reviewShareWorkflow / scanPromptInjection", () => {
+  it("lists each output path, which replaces a project file when a run ends", () => {
+    const review = reviewShareWorkflow({
+      name: "w",
+      outputs: {
+        report: { value: "x", path: "docs/report.md" },
+        log: { value: "y" },
+      },
+      phases: [],
+    });
+    const found = review.findings.filter((f) => f.code === "output_path");
+    expect(found).toHaveLength(1);
+    expect(found[0]?.message).toContain("output 'report' replaces 'docs/report.md'");
+    expect(review.requiresConfirmation).toBe(false);
+  });
+
   it("surfaces prompts for agent steps", () => {
     const review = reviewShareWorkflow(withPrompt);
     expect(review.summary.prompts).toBe(1);
