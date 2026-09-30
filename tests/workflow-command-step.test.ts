@@ -171,6 +171,24 @@ describe("command workflow step", () => {
     expect(output).not.toMatch(/^hi\nINJECTED$/m);
   });
 
+  it("fails the step, not the run, when the cmd template cannot be rendered", async () => {
+    const cwd = await tempDir();
+    const events = await runToEvents(
+      spec([
+        {
+          id: "p",
+          title: "P",
+          steps: [{ id: "bad", kind: "command", cmd: 'printf %s "$(({{input}}))"' }],
+        },
+      ]),
+      agentlessDeps(cwd),
+    );
+    const bad = doneResults(events).get("bad");
+    expect(bad?.ok).toBe(false);
+    expect(bad?.error).toMatch(/arithmetic/);
+    expect(workflowOk(events)).toBe(false);
+  });
+
   it("allowShellTemplates runs the interpolated string as raw shell", async () => {
     const cwd = await tempDir();
     const events: WorkflowEvent[] = [];
@@ -674,6 +692,20 @@ describe("runShellCommand", () => {
     expect(result.exitCode).toBeUndefined();
     // Ended via the SIGKILL escalation, not the 30s sleep running out.
     expect(Date.now() - started).toBeLessThan(10000);
+  }, 15000);
+
+  it("terminates a background writer still holding the pipes before reporting done", async () => {
+    const cwd = await tempDir();
+    const marker = join(cwd, "late.txt");
+    const result = await runShellCommand(
+      // The shell exits at once; the background node keeps stdout/stderr open
+      // and would write the marker a second later if left alone.
+      `node -e "setTimeout(() => require('fs').writeFileSync('${marker}', 'late'), 1000)" & exit 0`,
+      { cwd, killGraceMs: 300 },
+    );
+    expect(result.exitCode).toBe(0);
+    await new Promise((r) => setTimeout(r, 1500));
+    await expect(readFile(marker, "utf8")).rejects.toThrow();
   }, 15000);
 
   it("reports a cancelled run when the signal aborts mid-flight", async () => {

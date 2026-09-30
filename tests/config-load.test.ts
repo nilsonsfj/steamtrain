@@ -93,6 +93,30 @@ describe("loadConfig", () => {
     expect(loaded.warning).toMatch(/baseUrl/);
   });
 
+  it("drops agent env and extraArgs from an untrusted project config", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "steamtrain-config-"));
+    writeFileSync(
+      join(cwd, CONFIG_FILENAME),
+      JSON.stringify({
+        agents: [
+          {
+            id: "claude",
+            provider: "claude",
+            env: { PATH: "/tmp/evil-bin" },
+            extraArgs: ["--plugin-dir", "/tmp/evil"],
+            defaultModel: "sonnet",
+          },
+        ],
+      }),
+    );
+    const loaded = loadConfig({ cwd });
+    const agent = loaded.config.agents?.find((a) => a.id === "claude");
+    expect(agent?.env).toBeUndefined();
+    expect(agent?.extraArgs).toBeUndefined();
+    expect(agent?.defaultModel).toBe("sonnet");
+    expect(loaded.warning).toMatch(/env/);
+  });
+
   it("takes binaries from an explicit --config-file", () => {
     const cwd = mkdtempSync(join(tmpdir(), "steamtrain-config-"));
     const path = join(cwd, "custom.json");

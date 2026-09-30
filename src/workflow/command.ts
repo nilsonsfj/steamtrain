@@ -162,12 +162,15 @@ export async function runShellCommand(
       resolve({ exitCode, output, truncated, timedOut, cancelled, spawnError });
     };
 
+    // Set when the shell exited but a background process still held the output
+    // pipes: the group is terminated and reaped before the step reports done.
+    let lingeringExit: { code: number | undefined } | undefined;
     const finishAfterTreeExit = async (exitCode: number | undefined): Promise<void> => {
       if (settled) return;
-      if (timedOut || cancelled) {
+      if (timedOut || cancelled || lingeringExit) {
         await waitForProcessGroupExit(pgid, child, killGraceMs + 1000);
       }
-      finish(exitCode);
+      finish(lingeringExit && !timedOut && !cancelled ? lingeringExit.code : exitCode);
     };
 
     child.on("error", (err) => {
@@ -176,19 +179,20 @@ export async function runShellCommand(
     });
     child.on("exit", (code) => {
       // A backgrounded grandchild can keep stdout/stderr open after the shell
-      // exits, so 'close' never fires. Wait briefly, then drop the pipes —
-      // unless we are already escalating a timeout/cancel kill; destroying
-      // stdio would resolve the step before SIGKILL reaches the grandchild.
+      // exits, so 'close' never fires. Wait briefly, then terminate the group
+      // (SIGTERM, then SIGKILL after the grace) and report only once it is
+      // gone: resolving earlier would let workspace cleanup and dependent steps
+      // race a writer that is still running. Skipped while a timeout/cancel
+      // kill is already escalating.
       closeTimer = setTimeout(() => {
-        if (timedOut || cancelled) return;
-        child.stdout?.destroy();
-        child.stderr?.destroy();
-        finish(code ?? undefined);
+        if (timedOut || cancelled || settled) return;
+        lingeringExit = { code: code ?? undefined };
+        terminate();
       }, 250);
       closeTimer.unref();
     });
     child.on("close", (code) => {
-      if (timedOut || cancelled) {
+      if (timedOut || cancelled || lingeringExit) {
         void finishAfterTreeExit(code ?? undefined);
         return;
       }

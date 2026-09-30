@@ -244,6 +244,16 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
   let heredoc: PendingHeredoc | undefined;
   /** True when the previous unquoted character was escaped (`foo\ #` is one word). */
   let prevEscaped = false;
+  /**
+   * Template ranges the shell evaluates arithmetically without a `$((`: bare
+   * `((…))`, `$[…]`, `${v:offset:length}`, and array subscripts. Bash also
+   * evaluates variable VALUES there, so a bound variable is still executable
+   * (`a[$(cmd)]+1`); placeholders must not appear inside these ranges.
+   */
+  const arithSpans: Array<[number, number]> = [];
+  const bracketSpans: Array<[number, number]> = [];
+  const inSpan = (spans: Array<[number, number]>, pos: number): boolean =>
+    spans.some(([a, b]) => pos >= a && pos < b);
   const bindings: string[] = [];
   const namespace = `STEAMTRAIN_DATA_${randomBytes(16).toString("hex")}`;
   const bind = (value: string, quote: ShellQuoteContext, body = false): string => {
@@ -265,7 +275,7 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
         out,
         ctx,
         bind,
-        stack.some((context) => context.kind === "arithmetic"),
+        stack.some((context) => context.kind === "arithmetic") || inSpan(arithSpans, i),
       );
       out = rendered.out;
       i = rendered.nextI;
@@ -280,8 +290,14 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
       if (value === undefined) {
         out += ph[0];
       } else {
-        if (stack.some((context) => context.kind === "arithmetic")) {
-          throw new Error("Command placeholders cannot occur inside arithmetic substitutions");
+        if (
+          stack.some((context) => context.kind === "arithmetic") ||
+          inSpan(arithSpans, i) ||
+          arithmeticOperand(template, i, ph[0].length, out, inSpan(bracketSpans, i))
+        ) {
+          throw new Error(
+            "Command placeholders cannot occur inside arithmetic substitutions or expressions",
+          );
         }
         out += bind(redactSecrets(value), comment ? null : frame.quote);
       }
@@ -363,6 +379,19 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
       continue;
     }
 
+    if (ch === "$" && nxt === "[") {
+      arithSpans.push([i + 2, matchClose(template, i + 2, "[", "]")]);
+    } else if (ch === "$" && nxt === "{") {
+      collectParamArithSpans(template, i, arithSpans);
+    } else if (frame.quote === null && ch === "[" && /[A-Za-z0-9_]$/.test(out)) {
+      arithSpans.push([i + 1, matchClose(template, i + 1, "[", "]")]);
+    } else if (frame.quote === null && ch === "(" && nxt === "(" && isCommandPosition(out)) {
+      arithSpans.push([i + 2, matchClose(template, i + 2, "(", ")", 2)]);
+    } else if (frame.quote === null && ch === "[" && nxt === "[" && isWordStart(out)) {
+      const end = template.indexOf("]]", i + 2);
+      bracketSpans.push([i + 2, end === -1 ? template.length : end]);
+    }
+
     if (ch === "$" && nxt === "(") {
       out += "$(";
       i += 2;
@@ -380,7 +409,14 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
       continue;
     }
 
-    if (frame.quote === null && ch === "<" && nxt === "<" && template[i + 2] !== "<") {
+    if (
+      frame.quote === null &&
+      frame.kind !== "arithmetic" &&
+      !inSpan(arithSpans, i) &&
+      ch === "<" &&
+      nxt === "<" &&
+      template[i + 2] !== "<"
+    ) {
       const parsed = consumeHeredocOpener(template, i, out.length);
       out += parsed.emitted;
       i = parsed.nextI;
@@ -418,6 +454,77 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
     }
   }
   return bindings.length ? `${bindings.join("\n")}\n${out}` : out;
+}
+
+/** Index of the `close` matching an already-open `open` (depth 1); end of text if unbalanced. */
+function matchClose(text: string, from: number, open: string, close: string, start = 1): number {
+  let depth = start;
+  for (let pos = from; pos < text.length; pos++) {
+    const c = text[pos];
+    if (c === "\\") pos++;
+    else if (c === open) depth++;
+    else if (c === close && --depth === 0) return pos;
+  }
+  return text.length;
+}
+
+/** Record the arithmetic parts of `${…}` at `start`: array subscripts and `:offset:length`. */
+function collectParamArithSpans(
+  template: string,
+  start: number,
+  spans: Array<[number, number]>,
+): void {
+  const close = matchClose(template, start + 2, "{", "}");
+  const name = /^[!#]?(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[@*])/.exec(
+    template.slice(start + 2, close),
+  );
+  if (!name) return;
+  let pos = start + 2 + name[0].length;
+  if (template[pos] === "[") {
+    const end = matchClose(template, pos + 1, "[", "]");
+    spans.push([pos + 1, end]);
+    pos = end + 1;
+  }
+  if (template[pos] === ":" && !"-=?+".includes(template[pos + 1] ?? "-")) {
+    spans.push([pos + 1, close]);
+  }
+}
+
+/** True when a command word can start at the end of `out` (`((` is then arithmetic). */
+function isCommandPosition(out: string): boolean {
+  return /(?:^|[\n;&|({]|\b(?:then|do|else|elif|if|while|until|for))\s*$/.test(out);
+}
+
+function isWordStart(out: string): boolean {
+  return out.length === 0 || /[\s;&|(]$/.test(out);
+}
+
+/**
+ * True when the placeholder at `pos` is an operand bash evaluates as an
+ * arithmetic expression: `[[ a -eq X ]]`, or an argument of `let` / integer
+ * `declare` (which evaluate assigned values).
+ */
+function arithmeticOperand(
+  template: string,
+  pos: number,
+  length: number,
+  out: string,
+  inDoubleBracket: boolean,
+): boolean {
+  const compare = "-(?:eq|ne|lt|le|gt|ge)";
+  if (
+    inDoubleBracket &&
+    (new RegExp(`\\s${compare}\\s+["']?$`).test(out) ||
+      new RegExp(`^["']?\\s+${compare}\\s`).test(template.slice(pos + length)))
+  ) {
+    return true;
+  }
+  const boundary = Math.max(...["\n", ";", "&", "|", "("].map((c) => out.lastIndexOf(c)));
+  const command = out.slice(boundary + 1);
+  return (
+    /^\s*(?:let|integer)\s/.test(command) ||
+    /^\s*(?:declare|typeset|local|export|readonly)\s(?:.*\s)?-[A-Za-z]*i/.test(command)
+  );
 }
 
 function matchPlaceholder(template: string, i: number): RegExpMatchArray | null {

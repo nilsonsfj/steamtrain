@@ -151,6 +151,17 @@ describe("repo-wide worktree GC", () => {
     expect(result.skipped.map((s) => s.entry.branch)).toEqual([pending.branch]);
   });
 
+  it("finds a UUID-run worktree on a detached head after its branch ref is deleted", async () => {
+    const { repo, allocate } = await makeRepo("12345678-1234-1234-1234-123456789abc");
+    const lease = await allocate("step", async (root) => {
+      await git(root, "checkout", "--detach");
+    });
+    await git(repo, "branch", "-D", lease.branch as string);
+    const entries = await listRepoWorktrees(repo, []);
+    expect(entries.map((e) => e.branch)).toContain(lease.branch);
+    expect(await reclaimCleanRunWorktrees("12345678-1234-1234-1234-123456789abc", repo)).toBe(1);
+  });
+
   it("sees worktrees a step left on a detached head, and keeps their own commits", async () => {
     const { repo, allocate } = await makeRepo();
     // A step that rebases or checks out inside its worktree leaves a detached
@@ -258,7 +269,7 @@ interface Harness {
   allocate: (stepId: string, edit: (root: string) => Promise<void>) => Promise<AgentWorkspaceLease>;
 }
 
-async function makeRepo(): Promise<Harness> {
+async function makeRepo(runId = "gc-run"): Promise<Harness> {
   const root = await mkdtemp(join(tmpdir(), "steamtrain-gc-test-"));
   tempRoots.push(root);
   const repo = join(root, "repo");
@@ -272,7 +283,7 @@ async function makeRepo(): Promise<Harness> {
 
   const manager = createGitWorktreeManager({
     baseDir: join(root, "worktrees"),
-    runId: "gc-run",
+    runId,
   });
   return {
     repo,

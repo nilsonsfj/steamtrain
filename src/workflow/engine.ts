@@ -1120,8 +1120,7 @@ async function* runDagScheduler(env: RunEnv): AsyncGenerator<WorkflowEvent, bool
   };
 
   const control = env.deps.control;
-  const driver = (async () => {
-    const inFlight = new Map<string, Promise<void>>();
+  const driveLoop = async (inFlight: Map<string, Promise<void>>): Promise<void> => {
     while (true) {
       // Let the consumer process events already in the channel (a pause, an
       // abort) before scanning for the next launch, so steering cannot lose a
@@ -1177,6 +1176,19 @@ async function* runDagScheduler(env: RunEnv): AsyncGenerator<WorkflowEvent, bool
       // relaunches instead of waiting for the next in-flight step to settle.
       if (control && paused) waiters.push(control.waitForWake(signal));
       await Promise.race(waiters);
+    }
+  };
+  const driver = (async () => {
+    const inFlight = new Map<string, Promise<void>>();
+    try {
+      await driveLoop(inFlight);
+    } catch (err) {
+      // An exceptional exit must not return while siblings still run: `drain`
+      // holds only this driver, so cancel and await every in-flight step here
+      // before the failure propagates and outer cleanup releases worktrees.
+      env.abortRun.abort();
+      await Promise.allSettled([...inFlight.values()]);
+      throw err;
     }
   })().finally(() => channel.close());
   env.drain.push(driver);
@@ -3579,9 +3591,23 @@ async function executeCommandStep(
     results: ctx.results,
     iteration: ctx.iteration,
   };
-  const cmd = renderCmd(step.cmd, templateCtx, {
-    allowShellTemplates: step.allowShellTemplates === true,
-  });
+  let cmd: string;
+  try {
+    cmd = renderCmd(step.cmd, templateCtx, {
+      allowShellTemplates: step.allowShellTemplates === true,
+    });
+  } catch (err) {
+    // A template the renderer refuses (e.g. data inside an arithmetic context)
+    // fails this step; it must not reject the scheduler and strand siblings.
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      stepId: step.id,
+      ok: false,
+      output: message,
+      error: message,
+      durationMs: Date.now() - started,
+    };
+  }
   // Env values are templates too (prefer `$VAR` over embedding data in cmd).
   // They are NOT shell-quoted — they land in the process environment as literals.
   const renderedEnv: Record<string, string> = {};

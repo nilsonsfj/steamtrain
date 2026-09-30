@@ -40,6 +40,15 @@ var SteamtrainDiff = (() => {
       const line = kind === "add" ? { kind, text, oldNumber: null, newNumber: newLine++ } : kind === "del" ? { kind, text, oldNumber: oldLine++, newNumber: null } : { kind, text, oldNumber: oldLine++, newNumber: newLine++ };
       hunk.lines.push(line);
     };
+    const hunkIsComplete = (current) => {
+      let oldSeen = 0;
+      let newSeen = 0;
+      for (const line of current.lines) {
+        if (line.kind !== "add") oldSeen += 1;
+        if (line.kind !== "del") newSeen += 1;
+      }
+      return oldSeen >= current.oldCount && newSeen >= current.newCount;
+    };
     for (const raw of patch.split("\n")) {
       if (raw.startsWith("diff --git ")) {
         file = { oldPath: null, newPath: null, status: "modified", isBinary: false, hunks: [] };
@@ -90,7 +99,13 @@ var SteamtrainDiff = (() => {
         file.newPath = dequote(raw.slice("rename to ".length));
         continue;
       }
-      if (raw.startsWith("--- ") && file.hunks.length === 0) {
+      if (raw.startsWith("--- ") && (file.hunks.length === 0 || hunk !== null && hunkIsComplete(hunk))) {
+        if (file.hunks.length > 0) {
+          file = { oldPath: null, newPath: null, status: "modified", isBinary: false, hunks: [] };
+          files.push(file);
+          hunk = null;
+          inBinaryBody = false;
+        }
         const path = raw.slice(4);
         file.oldPath = path === "/dev/null" ? null : stripPrefix(path, "a/");
         if (file.oldPath === null && file.status === "modified") file.status = "added";

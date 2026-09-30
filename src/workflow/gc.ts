@@ -199,11 +199,15 @@ export interface RepoWorktreeEntry {
 
 /**
  * The step branch a steamtrain worktree path belongs to, recovered from the
- * layout `…/<repoBasename>-<8 hex>/<10 hex runId>/<step>` that
+ * layout `…/<repoBasename>-<8 hex>/<runId>/<step>` that
  * `createGitWorktreeManager` builds every worktree under (see worktree.ts).
  * Deliberately strict: a path that does not match both id shapes is somebody
  * else's worktree and must never be attributed to steamtrain.
  */
+/** Legacy 10-hex run ids and the UUIDs live runs now pass to worktree naming. */
+const RUN_ID_DIR =
+  /^(?:[0-9a-f]{10}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
+
 function stepBranchFromWorktreePath(
   root: string,
   options: { requireIdShapes: boolean },
@@ -213,7 +217,7 @@ function stepBranchFromWorktreePath(
   const repoDir = basename(dirname(dirname(root)));
   if (!step || !runId) return undefined;
   if (options.requireIdShapes) {
-    if (!/^[0-9a-f]{10}$/.test(runId)) return undefined;
+    if (!RUN_ID_DIR.test(runId)) return undefined;
     if (!/-[0-9a-f]{8}$/.test(repoDir)) return undefined;
   }
   return `${BRANCH_PREFIX}${runId}/${step}`;

@@ -62,6 +62,35 @@ describe.skipIf(process.platform === "win32")("command values transported as dat
     expect(run('printf %s "$((1+1))" {{input}}', "x")).toBe("2x");
   });
 
+  it("rejects placeholders in every bash arithmetic context, not just $((…))", () => {
+    const payload = "a[$(printf INJECTED >&2)]+1";
+    const templates = [
+      'str=abcdef; printf %s "${str:{{input}}}"',
+      'str=abcdef; printf %s "${str:0:{{input}}}"',
+      'arr=(a b); printf %s "${arr[{{input}}]}"',
+      'printf %s "$[{{input}}]"',
+      "(( x = {{input}} ))",
+      "for ((i=0; i<{{input}}; i++)); do :; done",
+      "arr[{{input}}]=1",
+      'let "x={{input}}"',
+      "declare -i n={{input}}",
+      '[[ 1 -eq "{{input}}" ]]',
+      "[[ {{input}} -lt 3 ]]",
+    ];
+    for (const template of templates) {
+      expect(() => run(template, payload), template).toThrow(/arithmetic substitutions/);
+    }
+    // Non-arithmetic uses of the same syntax stay allowed.
+    expect(run('str=abcdef; printf %s "${str:-{{input}}}"', "x")).toBe("abcdef");
+    expect(run('[[ "{{input}}" == x ]] && printf yes', "x")).toBe("yes");
+    expect(run('[ "{{input}}" -eq 1 ] && printf yes', "1")).toBe("yes");
+  });
+
+  it("does not treat arithmetic left shifts as here-documents", () => {
+    expect(run('printf %s "$((\n1 << 2\n))"', "")).toBe("4");
+    expect(run('printf %s "$[1 << 2]"', "")).toBe("4");
+  });
+
   it("rejects placeholders in ANSI-C quotes instead of silently changing their values", () => {
     expect(() => run("printf %s $'{{input}}'", "hello")).toThrow(/ANSI-C quoted strings/);
   });

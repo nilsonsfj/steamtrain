@@ -238,13 +238,18 @@ export function mergeConfig(
         "project steamtrain.json `binaries` ignored until the project is trusted (use ~/.steamtrain/config.json or --config-file)",
       );
     }
-    if (override.agents?.some((agent) => agent.binary)) {
+    // `env` (PATH, LD_PRELOAD, NODE_OPTIONS, …) and `extraArgs` (config /
+    // plugin loading flags) can select or alter the executable just as `binary`
+    // does, so all three are trust-gated together.
+    if (override.agents?.some((agent) => agent.binary || agent.env || agent.extraArgs)) {
       agents = mergeAgentLists(
         base.agents,
-        override.agents.map(({ binary: _binary, ...rest }) => rest),
+        override.agents.map(
+          ({ binary: _binary, env: _env, extraArgs: _extraArgs, ...rest }) => rest,
+        ),
       );
       warnings.push(
-        "project steamtrain.json agent `binary` paths ignored until the project is trusted",
+        "project steamtrain.json agent `binary`, `env`, and `extraArgs` ignored until the project is trusted",
       );
     }
     if (override.apis?.some((api) => api.baseUrl || api.apiKeyEnv)) {
