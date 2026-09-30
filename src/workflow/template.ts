@@ -71,7 +71,8 @@ export interface RenderPromptOptions {
   redact?: boolean;
 }
 
-const PLACEHOLDER = /\{\{\s*([^{}]+?)\s*\}\}/g;
+/** The `{{ … }}` placeholder grammar. Global: use with `replace` or `matchAll`, not `exec`. */
+export const PLACEHOLDER = /\{\{\s*([^{}]+?)\s*\}\}/g;
 const INPUT_REF = /^inputs\.(.+)$/;
 // NOTE: STEP_FIELD's greedy `(.+)` id group means it also matches worktree/
 // artifact/json refs whose trailing part happens to end in a plain field name
@@ -258,15 +259,27 @@ function extractRefs(text: string | undefined): string[] {
  * `STEP_FIELD`), or undefined when the reference names no step.
  */
 function referencedStepId(ref: string): string | undefined {
-  for (const pattern of [STEP_WORKTREE_FIELD, STEP_ARTIFACT_FIELD, STEP_JSON_FIELD, STEP_FIELD]) {
-    const match = pattern.exec(ref);
-    if (match) return match[1] as string;
-  }
-  return undefined;
+  return referencedStep(ref)?.id;
 }
 
-/** A step result field that says how the step ended, rather than what it made. */
-const STEP_STATUS_FIELD = /^steps\.(.+)\.(ok|error|exitCode)$/;
+/**
+ * The step a `steps.…` reference reads, and whether it reads only how the step
+ * ended (`ok`, `error`, `exitCode`) rather than what it made. Judged by which
+ * pattern matched, in the order that matters: `steps.x.json.ok` is a field of
+ * the step's JSON, not its `ok`.
+ */
+function referencedStep(ref: string): { id: string; status: boolean } | undefined {
+  for (const pattern of [STEP_WORKTREE_FIELD, STEP_ARTIFACT_FIELD, STEP_JSON_FIELD]) {
+    const match = pattern.exec(ref);
+    if (match) return { id: match[1] as string, status: false };
+  }
+  const match = STEP_FIELD.exec(ref);
+  if (!match) return undefined;
+  return {
+    id: match[1] as string,
+    status: ["ok", "error", "exitCode"].includes(match[2] as string),
+  };
+}
 
 /**
  * The steps a template reads, in order of first use, each with whether it
@@ -276,10 +289,10 @@ const STEP_STATUS_FIELD = /^steps\.(.+)\.(ok|error|exitCode)$/;
 export function templateStepReads(text: string): Map<string, "status" | "content"> {
   const reads = new Map<string, "status" | "content">();
   for (const ref of extractRefs(text)) {
-    const id = referencedStepId(ref);
-    if (id === undefined) continue;
-    if (!STEP_STATUS_FIELD.test(ref)) reads.set(id, "content");
-    else if (!reads.has(id)) reads.set(id, "status");
+    const step = referencedStep(ref);
+    if (!step) continue;
+    if (!step.status) reads.set(step.id, "content");
+    else if (!reads.has(step.id)) reads.set(step.id, "status");
   }
   return reads;
 }

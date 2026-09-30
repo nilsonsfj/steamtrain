@@ -1,15 +1,17 @@
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runCli } from "../src/cli";
 import {
+  RUN_HANDOFF_ABORT,
   RunRecordBuilder,
   WORKFLOW_RUNS_DIR,
   type WorkflowDeps,
   type WorkflowEvent,
   type WorkflowSpec,
   createLiveRunStore,
+  hashWorkflowSpec,
   lintTemplateRefs,
   runWorkflow,
   validateWorkflow,
@@ -67,7 +69,7 @@ function reportSpec(outputs: WorkflowSpec["outputs"], cmd = "true"): WorkflowSpe
 
 async function run(
   spec: WorkflowSpec,
-  ctx: { outputPaths?: Record<string, string> } = {},
+  ctx: { outputPaths?: Record<string, string>; startedAt?: number } = {},
   extra: Partial<WorkflowDeps> = {},
   signal?: AbortSignal,
 ): Promise<WorkflowEvent[]> {
@@ -227,7 +229,7 @@ describe("workflow outputs: a run writes them", () => {
     expect(report).toMatchObject({ written: false, error: "step 'gone' did not run" });
   });
 
-  it("writes nothing for a canceled run", async () => {
+  it("says a step never ran when the run was canceled before it", async () => {
     const ac = new AbortController();
     ac.abort();
     const events = await run(
@@ -236,10 +238,55 @@ describe("workflow outputs: a run writes them", () => {
       {},
       ac.signal,
     );
+    expect(done(events).outputs?.[0]).toMatchObject({
+      key: "report",
+      written: false,
+      error: "step 'report' did not run",
+    });
+    await expect(readdir(join(dir, ".steamtrain"))).rejects.toThrow();
+  });
+
+  it("writes the outputs that finished when the run is canceled or times out later", async () => {
+    const spec = reportSpec({ report: { value: "{{steps.report.output}}" } });
+    spec.phases.push({
+      id: "late",
+      title: "Late",
+      steps: [{ id: "late", kind: "command", dependsOn: ["report"], cmd: "sleep 30" }],
+    });
+    const ac = new AbortController();
+    const events: WorkflowEvent[] = [];
+    for await (const event of runWorkflow(spec, { input: "the parser" }, deps(), ac.signal)) {
+      events.push(event);
+      if (event.kind === "step_done" && event.stepId === "report") ac.abort();
+    }
+    const [report] = done(events).outputs ?? [];
+    expect(report?.written).toBe(true);
+    expect(await readFile(report?.path ?? "", "utf8")).toBe("Findings for the parser\n");
+  });
+
+  it("writes nothing for a run being handed to a background runner", async () => {
+    const ac = new AbortController();
+    ac.abort(RUN_HANDOFF_ABORT);
+    const events = await run(
+      reportSpec({ report: { value: "{{steps.report.output}}" } }),
+      {},
+      {},
+      ac.signal,
+    );
     expect(done(events).outputs).toEqual([
-      { key: "report", written: false, error: "the run was canceled" },
+      { key: "report", written: false, error: "the run was handed to a background runner" },
     ]);
     await expect(readdir(join(dir, ".steamtrain"))).rejects.toThrow();
+  });
+
+  it("names the directory for the start the run was given, not for now", async () => {
+    const startedAt = new Date(2026, 0, 2, 3, 4, 5).getTime();
+    const events = await run(reportSpec({ report: { value: "{{steps.report.output}}" } }), {
+      startedAt,
+    });
+    expect(relative(dir, done(events).outputs?.[0]?.path ?? "")).toBe(
+      join(".steamtrain/outputs/hunt/2026-01-02_03-04-05/report.md"),
+    );
   });
 
   it("does not write a sub-workflow's outputs, only the outer run's", async () => {
@@ -299,6 +346,70 @@ describe("workflow outputs: writing", () => {
     } finally {
       await rm(outside, { recursive: true, force: true });
     }
+  });
+
+  it("refuses a default directory that a symlink would carry out", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "steamtrain-outputs-outside-"));
+    try {
+      await mkdir(join(dir, ".steamtrain"));
+      await symlink(outside, join(dir, ".steamtrain", "outputs"));
+      const [report] = await writeWorkflowOutputs(spec(), {
+        cwd: dir,
+        startedAt: Date.now(),
+        context,
+        results,
+      });
+      expect(report?.written).toBe(false);
+      expect(report?.error).toContain("refusing to write outside");
+      expect(await readdir(outside)).toEqual([]);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("reports an unwritten default output in the directory the run claimed", async () => {
+    const two: WorkflowSpec = {
+      name: "hunt",
+      outputs: {
+        report: { value: "{{steps.report.output}}" },
+        log: { value: "{{steps.check.output}}" },
+      },
+      phases: [],
+    };
+    const ctx = { input: "x", outputs: new Map([["report", "body"]]) };
+    const res = new Map([["report", { ok: true }]]);
+    const startedAt = Date.now();
+    const first = await writeWorkflowOutputs(two, {
+      cwd: dir,
+      startedAt,
+      context: ctx,
+      results: res,
+    });
+    const second = await writeWorkflowOutputs(two, {
+      cwd: dir,
+      startedAt,
+      context: ctx,
+      results: res,
+    });
+    // Two runs in the same second: the second one's directory has a suffix, and
+    // so does the place its unwritten output would have gone.
+    expect(dirname(second[0]?.path ?? "")).toBe(dirname(second[1]?.path ?? ""));
+    expect(dirname(second[1]?.path ?? "")).not.toBe(dirname(first[1]?.path ?? ""));
+    expect(dirname(second[1]?.path ?? "")).toMatch(/-2$/);
+  });
+
+  it("does not treat a JSON or artifact field named ok or error as a status read", async () => {
+    const value = "{{steps.review.json.ok}} {{steps.review.artifacts.error}}";
+    const [report] = await writeWorkflowOutputs(
+      { name: "hunt", outputs: { r: { value } }, phases: [] },
+      {
+        cwd: dir,
+        startedAt: Date.now(),
+        context: { input: "x", outputs: new Map() },
+        results: new Map([["review", { ok: false }]]),
+      },
+    );
+    expect(report).toMatchObject({ written: false, error: "step 'review' failed" });
   });
 
   it("creates nothing through a symlinked directory on the way", async () => {
@@ -437,6 +548,19 @@ describe("workflow outputs: the CLI", () => {
     }
   });
 
+  it("refuses --out given twice for one output", async () => {
+    const { code, stderr } = await cli(["--out", "report=a.md", "--out", "report=b.md"]);
+    expect(code).toBe(1);
+    expect(stderr).toContain("usage:");
+  });
+
+  it("leaves no temp file behind when --out names a directory", async () => {
+    await mkdir(join(dir, "reports"));
+    const { stdout } = await cli(["--out", "report=reports"]);
+    expect(stdout).toContain("not saved report:");
+    expect(await readdir(dir)).not.toContainEqual(expect.stringMatching(/\.tmp$/));
+  });
+
   it("refuses --out for an output the workflow does not declare", async () => {
     const { code, stderr } = await cli(["--out", "summary=x.md"]);
     expect(code).toBe(1);
@@ -485,6 +609,22 @@ describe("workflow outputs: where they show up", () => {
     expect(
       arrivalOutputLines([saved("/work/app/r.md"), saved("/work/app2/r.md")], "/work/app/"),
     ).toEqual(["saved report → r.md", "saved report → /work/app2/r.md"]);
+  });
+
+  it("leaves the outputs out of what a step's cache key hashes", () => {
+    const base = reportSpec(undefined);
+    const withOutputs = reportSpec({ report: { value: "{{steps.report.output}}" } });
+    const edited = reportSpec({
+      report: {
+        value: "{{steps.report.output}}",
+        description: "changed",
+        path: "r/{{workflow}}.md",
+      },
+    });
+    expect(hashWorkflowSpec(withOutputs)).toBe(hashWorkflowSpec(base));
+    expect(hashWorkflowSpec(edited)).toBe(hashWorkflowSpec(base));
+    // A step change still does.
+    expect(hashWorkflowSpec(reportSpec(undefined, "exit 1"))).not.toBe(hashWorkflowSpec(base));
   });
 
   it("carries an output's description through to its result", async () => {

@@ -264,17 +264,25 @@ and web UI show the path when the run ends.
   `value` reads finished ok. Otherwise it is recorded as not saved, with the
   step that stopped it (`step 'report' failed`). A step read only for how it
   ended (`{{steps.check.ok}}`, `.error`, `.exitCode`) just has to have run,
-  so an output can write down a failure: `"value": "check failed: {{steps.check.error}}"`. A canceled run writes none
-  (it may be resuming elsewhere), and a sub-workflow's run writes none: only
-  the run a person started does.
+  so an output can write down a failure:
+  `"value": "check failed: {{steps.check.error}}"`. A canceled or timed-out
+  run still writes the outputs whose steps finished. A run being handed to a
+  background runner writes none (the runner writes them when it finishes the
+  run), and a sub-workflow's run writes none: only the run a person started
+  does.
 - **Read-only runs still save.** The engine writes the file after the steps
   are done, so a `read-only` workflow (bug-hunt, code-review) keeps its report
   without any step getting write access.
-- **Where it may go.** A spec's `path` must stay inside the directory the run
-  started in, and out of `.git`: it is checked before and after following
-  symlinks, and an input value fills one path segment at most. Two runs that
-  start in the same second get separate default directories.
-- **Per run.** `--out <key>=<path>` sends one output elsewhere for one CLI run.
+- **Where it may go.** A spec's `path`, and the default
+  `.steamtrain/outputs/` directory, must stay inside the directory the run
+  started in, and out of `.git`: they are checked before and after following
+  symlinks, so a repository that makes either a link to somewhere else cannot
+  carry the file out (use `--out` to write there on purpose). An input value
+  fills one path segment at most. Two runs that start in the same second get
+  separate default directories. The directory is named for when the run
+  started, and a run handed to a background runner keeps its original start.
+- **Per run.** `--out <key>=<path>` sends one output elsewhere for one CLI run
+  (once per key).
   That path is yours, so it may be anywhere; a relative one resolves against
   the directory the run starts in. `--dry-run` ignores `--out`, as it does the
   other run-only flags: a plan writes nothing.

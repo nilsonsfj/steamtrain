@@ -122,9 +122,9 @@ class LaunchHost implements WorkflowHost {
     _approval?: unknown,
     _control?: unknown,
     _humanInput?: unknown,
-    maxConcurrency?: number,
+    options?: { maxConcurrency?: number },
   ): AsyncIterable<WorkflowEvent> {
-    this.launched.push({ maxConcurrency });
+    this.launched.push({ maxConcurrency: options?.maxConcurrency });
     return (async function* () {
       yield { kind: "workflow_start", name, phaseCount: 1, stepCount: 2, ts: Date.now() };
       yield { kind: "workflow_done", ok: true, results: [], ts: Date.now() };

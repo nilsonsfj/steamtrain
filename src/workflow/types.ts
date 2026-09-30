@@ -20,7 +20,7 @@ import type { JsonSchema } from "./structured";
 // Circular import is safe: template.ts imports types from this module, and this
 // module imports lintTemplateRefs from template.ts. Both modules are fully
 // initialized before any cross-referenced function is called at runtime.
-import { lintTemplateRefs } from "./template";
+import { PLACEHOLDER, lintTemplateRefs } from "./template";
 
 export type { WorkflowInputType } from "./input-params";
 export { WORKFLOW_INPUT_TYPES, workflowInputType, isStringLikeInputType } from "./input-params";
@@ -2113,7 +2113,7 @@ function outputPathIssue(path: string, spec: WorkflowSpec): string | undefined {
   if (segments.some((segment) => segment.toLowerCase() === ".git")) {
     return `'${path}' must not write into .git`;
   }
-  for (const match of path.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)) {
+  for (const match of path.matchAll(PLACEHOLDER)) {
     const expr = match[1] as string;
     if (expr === "workflow" || expr === "run.timestamp") continue;
     if (expr.startsWith("inputs.") && spec.inputs?.[expr.slice(7)]) continue;

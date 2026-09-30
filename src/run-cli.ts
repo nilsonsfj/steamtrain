@@ -230,7 +230,7 @@ export function parseRunOptions(args: string[]): RunOptions | null {
       const eq = value.indexOf("=");
       if (eq < 1 || eq === value.length - 1) return null;
       const key = value.slice(0, eq);
-      if (key.startsWith("-")) return null;
+      if (key.startsWith("-") || key in options.outputPaths) return null;
       options.outputPaths[key] = value.slice(eq + 1);
       i += 1;
     } else {
@@ -1160,8 +1160,8 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<Drive
       options.approval,
       control,
       options.humanInput,
-      undefined,
-      options.outputPaths,
+      // A handed-off run keeps the start its first owner gave it.
+      { outputPaths: options.outputPaths, startedAt: options.priorOwner?.startedAt },
     )) {
       const event = asOwnWork(replayed);
       recorder.handle(event);

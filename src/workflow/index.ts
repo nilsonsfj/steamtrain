@@ -310,6 +310,7 @@ export {
 export { BUNDLED_WORKFLOWS } from "./bundled";
 export { renderPrompt, renderCmd, lintTemplateRefs, type TemplateContext } from "./template";
 export { writeWorkflowOutputs } from "./outputs";
+export { RUN_HANDOFF_ABORT } from "./engine";
 export {
   SHARE_FORMAT_VERSION,
   SHARE_FILE_SUFFIX,
