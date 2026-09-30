@@ -26,7 +26,7 @@ describe("shellQuote / renderCmd", () => {
       input: "hi; curl evil.test",
       outputs: new Map(),
     });
-    expect(cmd).toBe("echo 'hi; curl evil.test'");
+    expect(execFileSync("sh", ["-c", cmd], { encoding: "utf8" })).toBe("hi; curl evil.test\n");
   });
 
   it("leaves values raw when allowShellTemplates is set", () => {
@@ -41,10 +41,12 @@ describe("shellQuote / renderCmd", () => {
   it("escapes a value sitting inside double quotes instead of wrapping it", () => {
     const cmd = renderCmd(
       'echo "{{input}}"',
-      { input: 'x"; rm -rf /; echo "', outputs: new Map() },
+      { input: 'x"; printf INJECTED; printf "', outputs: new Map() },
       { platform: "linux" },
     );
-    expect(cmd).toBe('echo "x\\"; rm -rf /; echo \\""');
+    expect(execFileSync("sh", ["-c", cmd], { encoding: "utf8" })).toBe(
+      'x"; printf INJECTED; printf "\n',
+    );
   });
 
   it("escapes a value sitting inside single quotes", () => {
@@ -53,7 +55,7 @@ describe("shellQuote / renderCmd", () => {
       { input: "it's", outputs: new Map() },
       { platform: "linux" },
     );
-    expect(cmd).toBe(`echo 'it'\\''s'`);
+    expect(execFileSync("sh", ["-c", cmd], { encoding: "utf8" })).toBe("it's\n");
   });
 
   it("does not treat a backslash-escaped quote as opening a quoted string", () => {
@@ -126,7 +128,6 @@ describe("shellQuote / renderCmd", () => {
       { input: 'x"; printf INJECTED; echo "', outputs: new Map() },
       { platform: "linux" },
     );
-    expect(cmd).toBe('printf %s ${#} "x\\"; printf INJECTED; echo \\""');
     const out = execFileSync("sh", ["-c", cmd], { encoding: "utf8" });
     expect(out).toBe('0x"; printf INJECTED; echo "');
   });

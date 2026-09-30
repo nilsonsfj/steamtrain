@@ -1,7 +1,7 @@
-import { mkdir, readFile, stat, unlink, utimes, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { type FileHandle, link, mkdir, open, unlink, utimes, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { dirname } from "node:path";
-import { isPidAlive } from "../util/process-group";
 import { isEnoent } from "./fs-util";
 import { abortableSleep } from "./timeout";
 
@@ -9,21 +9,19 @@ import { abortableSleep } from "./timeout";
  * Cross-process exclusive file lock shared by the land lock (PR merges) and
  * the project state lock (`.steamtrain/` writers + worktree add).
  *
- * Acquisition is exclusive-create (`wx`) of a JSON payload `{ pid, host,
- * createdAtMs }`. Holders refresh mtime so long critical sections are not
- * mistaken for abandoned locks; dead same-host PIDs and stale mtimes are
- * stealable. Every replacement of the lock file — exclusive create, stale
- * steal, and ownership-checked release — takes a sibling `.steal` coordinator
- * first, so a holder finishing cannot be unlinked out from under a waiter who
- * already wx-created a new lock. Abandoned coordinators are removed only
- * after an exclusive per-inode claim, so a newly acquired coordinator is
- * never moved or unlinked by a late reclaim.
+ * Payloads are fully written before an exclusive hard-link publishes them.
+ * All main-lock mutations take the sibling coordinator. Recovery is allowed
+ * only for a provably dead same-host owner, never just an expired heartbeat.
+ * Each coordinator incarnation has an immutable chain of recovery claims;
+ * a dead claimant can be succeeded without deleting a claim another process
+ * may have acquired. Recovery claims are retained to prevent delayed readers
+ * from reopening an old generation.
  */
 
 export interface FileLockOptions {
   /** Give up acquiring after this long. Default 10 min. */
   maxWaitMs?: number;
-  /** A held lock older than this (by mtime) is treated as abandoned. Default 15 min. */
+  /** Heartbeat cadence basis. Age alone never permits reclaiming an owner. Default 15 min. */
   staleMs?: number;
   /** Poll interval while another process holds the lock. Default 750ms. */
   pollMs?: number;
@@ -49,16 +47,13 @@ interface LockPayload {
   pid: number;
   host: string;
   createdAtMs: number;
+  token?: string;
 }
 
 const DEFAULT_MAX_WAIT_MS = 10 * 60_000;
 const DEFAULT_STALE_MS = 15 * 60_000;
 const DEFAULT_POLL_MS = 750;
-/** A steal-coordinator file older than this is assumed abandoned. */
-const STEAL_LOCK_STALE_MS = 10_000;
-/** 5ms poll × attempts. Acquire/steal can fail fast; release must not. */
 const STEAL_LOCK_ACQUIRE_ATTEMPTS = 8;
-const STEAL_LOCK_RELEASE_ATTEMPTS = 2_000;
 
 /**
  * Run `fn` while holding an exclusive lock at `lockPath`. See
@@ -82,15 +77,12 @@ export async function withFileLock<T>(
   const deadline = now() + maxWaitMs;
   let contendedNotice = false;
   let held = false;
+  const payload = newPayload(now());
 
   while (!held) {
     if (opts.signal?.aborted) throw new Error("cancelled");
-    const acquired = await tryAcquire(lockPath, now());
+    const acquired = await tryAcquire(lockPath, payload);
     if (acquired) {
-      held = true;
-      break;
-    }
-    if (await stealIfStale(lockPath, staleMs, now())) {
       held = true;
       break;
     }
@@ -121,51 +113,63 @@ export async function withFileLock<T>(
   try {
     return { value: await fn(true), locked: true };
   } finally {
-    clearInterval(heartbeat);
-    await releaseIfOwned(lockPath);
+    try {
+      await releaseIfOwned(lockPath, payload.token!);
+    } finally {
+      clearInterval(heartbeat);
+    }
   }
 }
 
-async function wxLock(lockPath: string, nowMs: number): Promise<boolean> {
+interface LockSnapshot {
+  holder: LockPayload;
+  ino: number;
+  dev: number;
+  raw: string;
+}
+
+function newPayload(nowMs = Date.now()): LockPayload {
+  return { pid: process.pid, host: hostname(), createdAtMs: nowMs, token: randomUUID() };
+}
+
+function holderIsDead(holder: LockPayload): boolean {
+  if (holder.host !== hostname()) return false;
   try {
-    const payload: LockPayload = { pid: process.pid, host: hostname(), createdAtMs: nowMs };
-    await writeFile(lockPath, JSON.stringify(payload), { flag: "wx" });
+    process.kill(holder.pid, 0);
+    return false;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "ESRCH";
+  }
+}
+
+async function publishPayload(path: string, payload: LockPayload): Promise<boolean> {
+  const temp = `${path}.owner.${randomUUID()}`;
+  try {
+    await writeFile(temp, JSON.stringify(payload), { flag: "wx", mode: 0o600 });
+    await link(temp, path);
     return true;
   } catch (err) {
     if (isEnoent(err)) {
-      await mkdir(dirname(lockPath), { recursive: true });
+      await mkdir(dirname(path), { recursive: true });
       return false;
     }
     if (isEexist(err)) return false;
     throw err;
+  } finally {
+    await unlink(temp).catch(() => {});
   }
 }
 
-async function tryAcquire(lockPath: string, nowMs: number): Promise<boolean> {
-  const got = await withStealLock(lockPath, () => wxLock(lockPath, nowMs));
-  return got === true;
-}
-
-async function stealIfStale(lockPath: string, staleMs: number, nowMs: number): Promise<boolean> {
-  if (!(await isLockStealable(lockPath, staleMs, nowMs))) return false;
-  const got = await withStealLock(lockPath, async () => {
-    if (!(await isLockStealable(lockPath, staleMs, nowMs))) return false;
-    await unlink(lockPath).catch(() => {});
-    return wxLock(lockPath, nowMs);
-  });
-  return got === true;
-}
-
-async function isLockStealable(lockPath: string, staleMs: number, nowMs: number): Promise<boolean> {
-  let mtimeMs: number;
-  try {
-    mtimeMs = (await stat(lockPath)).mtimeMs;
-  } catch (err) {
-    return isEnoent(err);
-  }
-  const holder = await readHolder(lockPath);
-  const deadSameHost = Boolean(holder && holder.host === hostname() && !isPidAlive(holder.pid));
-  return deadSameHost || nowMs - mtimeMs > staleMs;
+async function tryAcquire(lockPath: string, payload: LockPayload): Promise<boolean> {
+  return (
+    (await withStealLock(lockPath, async () => {
+      if (await publishPayload(lockPath, payload)) return true;
+      const existing = await readLock(lockPath);
+      if (!existing || !holderIsDead(existing.holder)) return false;
+      await unlink(lockPath);
+      return publishPayload(lockPath, payload);
+    })) === true
+  );
 }
 
 async function withStealLock<T>(
@@ -175,11 +179,12 @@ async function withStealLock<T>(
 ): Promise<T | undefined> {
   const stealPath = `${lockPath}.steal`;
   for (let attempt = 0; attempt < attempts; attempt++) {
-    if (await tryAcquireStealLock(stealPath)) {
+    const payload = newPayload();
+    if (await tryAcquireStealLock(stealPath, payload)) {
       try {
         return await fn();
       } finally {
-        await unlink(stealPath).catch(() => {});
+        await removeIfOwned(stealPath, payload.token!);
       }
     }
     await abortableSleep(5);
@@ -187,132 +192,76 @@ async function withStealLock<T>(
   return undefined;
 }
 
-async function tryAcquireStealLock(stealPath: string): Promise<boolean> {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const payload: LockPayload = {
-        pid: process.pid,
-        host: hostname(),
-        createdAtMs: Date.now(),
-      };
-      await writeFile(stealPath, JSON.stringify(payload), { flag: "wx" });
-      return true;
-    } catch (err) {
-      if (isEnoent(err)) {
-        await mkdir(dirname(stealPath), { recursive: true });
-        return false;
-      }
-      if (!isEexist(err)) throw err;
-      if (attempt === 0 && (await reclaimAbandonedStealLock(stealPath))) continue;
-      return false;
-    }
-  }
-  return false;
+async function tryAcquireStealLock(stealPath: string, payload: LockPayload): Promise<boolean> {
+  if (await publishPayload(stealPath, payload)) return true;
+  if (!(await reclaimAbandonedStealLock(stealPath))) return false;
+  return publishPayload(stealPath, payload);
 }
 
 async function reclaimAbandonedStealLock(stealPath: string): Promise<boolean> {
-  let info: { mtimeMs: number; ino: number; dev: number };
-  try {
-    const s = await stat(stealPath);
-    info = { mtimeMs: s.mtimeMs, ino: s.ino, dev: s.dev };
-  } catch {
+  const observed = await readLock(stealPath);
+  if (!observed || !holderIsDead(observed.holder)) return false;
+  const identity = createHash("sha256")
+    .update(`${observed.dev}:${observed.ino}:${observed.raw}`)
+    .digest("hex");
+  for (let generation = 0; ; generation++) {
+    const claimPath = `${stealPath}.claim.${identity}.${generation}`;
+    if (await publishPayload(claimPath, newPayload())) break;
+    const claim = await readLock(claimPath);
+    if (!claim || !holderIsDead(claim.holder)) return false;
+  }
+  const current = await readLock(stealPath);
+  if (!current) return false;
+  if (
+    current.ino !== observed.ino ||
+    current.dev !== observed.dev ||
+    current.raw !== observed.raw
+  ) {
     return false;
   }
-  const holder = await readHolder(stealPath);
-  const deadSameHost = Boolean(holder && holder.host === hostname() && !isPidAlive(holder.pid));
-  if (!deadSameHost && Date.now() - info.mtimeMs <= STEAL_LOCK_STALE_MS) return false;
-  const claimPath = `${stealPath}.claim.${info.dev}.${info.ino}`;
-  if (!(await tryWxPayload(claimPath))) {
-    await unlinkAbandonedClaim(claimPath);
-    return false;
-  }
-  try {
-    let current: { ino: number; dev: number };
-    try {
-      const s = await stat(stealPath);
-      current = { ino: s.ino, dev: s.dev };
-    } catch (err) {
-      return isEnoent(err);
-    }
-    if (current.ino !== info.ino || current.dev !== info.dev) return false;
-    await unlink(stealPath).catch(() => {});
-    return true;
-  } finally {
-    await unlink(claimPath).catch(() => {});
-  }
-}
-
-async function tryWxPayload(path: string): Promise<boolean> {
-  try {
-    const payload: LockPayload = {
-      pid: process.pid,
-      host: hostname(),
-      createdAtMs: Date.now(),
-    };
-    await writeFile(path, JSON.stringify(payload), { flag: "wx" });
-    return true;
-  } catch (err) {
-    if (isEnoent(err) || isEexist(err)) return false;
-    throw err;
-  }
-}
-
-async function unlinkAbandonedClaim(claimPath: string): Promise<void> {
-  let mtimeMs: number;
-  try {
-    mtimeMs = (await stat(claimPath)).mtimeMs;
-  } catch {
-    return;
-  }
-  const holder = await readHolder(claimPath);
-  const deadSameHost = Boolean(holder && holder.host === hostname() && !isPidAlive(holder.pid));
-  if (!deadSameHost && Date.now() - mtimeMs <= STEAL_LOCK_STALE_MS) return;
-  await unlink(claimPath).catch(() => {});
-}
-
-async function releaseIfOwned(lockPath: string): Promise<void> {
-  const released = await withStealLock(
-    lockPath,
-    async () => {
-      await removeIfOwned(lockPath);
-      return true;
-    },
-    STEAL_LOCK_RELEASE_ATTEMPTS,
-  );
-  if (released === true) return;
-  // Coordinator stayed busy past the steal-stale window. Still drop our
-  // lock so waiters are not stuck on a live pid until the 15-minute stale
-  // timeout (or the 10-minute acquire limit).
-  await removeIfOwned(lockPath);
-}
-
-async function removeIfOwned(lockPath: string): Promise<void> {
-  const holder = await readHolder(lockPath);
-  if (holder && holder.pid === process.pid && holder.host === hostname()) {
-    await removeQuietly(lockPath);
-  }
-}
-
-async function readHolder(lockPath: string): Promise<LockPayload | undefined> {
-  try {
-    const raw = await readFile(lockPath, "utf8");
-    const parsed = JSON.parse(raw) as Partial<LockPayload>;
-    if (typeof parsed.pid === "number" && typeof parsed.host === "string") {
-      return { pid: parsed.pid, host: parsed.host, createdAtMs: Number(parsed.createdAtMs) || 0 };
-    }
-  } catch {
-    // Corrupt/empty/partial lock file — let staleness reclaim it.
-  }
-  return undefined;
-}
-
-async function removeQuietly(lockPath: string): Promise<boolean> {
-  try {
-    await unlink(lockPath);
-  } catch {
-    // Someone else removed/replaced it — fine.
-  }
+  await unlink(stealPath);
   return true;
+}
+
+async function releaseIfOwned(lockPath: string, token: string): Promise<void> {
+  await withStealLock(lockPath, () => removeIfOwned(lockPath, token), Number.POSITIVE_INFINITY);
+}
+
+async function removeIfOwned(path: string, token: string): Promise<void> {
+  const existing = await readLock(path);
+  if (!existing || existing.holder.token !== token) {
+    throw new Error(`lock ownership lost: ${path}`);
+  }
+  await unlink(path);
+}
+
+async function readLock(path: string): Promise<LockSnapshot | undefined> {
+  let handle: FileHandle | undefined;
+  try {
+    handle = await open(path, "r");
+    const raw = await handle.readFile("utf8");
+    const info = await handle.stat();
+    let parsed: Partial<LockPayload>;
+    try {
+      parsed = JSON.parse(raw) as Partial<LockPayload>;
+    } catch {
+      return undefined;
+    }
+    if (
+      !parsed ||
+      !Number.isInteger(parsed.pid) ||
+      Number(parsed.pid) <= 0 ||
+      typeof parsed.host !== "string"
+    ) {
+      return undefined;
+    }
+    return { holder: parsed as LockPayload, ino: info.ino, dev: info.dev, raw };
+  } catch (err) {
+    if (isEnoent(err)) return undefined;
+    throw err;
+  } finally {
+    await handle?.close();
+  }
 }
 
 function isEexist(err: unknown): boolean {

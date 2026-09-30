@@ -807,6 +807,20 @@ Semantics:
   non-required external reviews) before merging and deleting the remote head
   branch. See `workflow pr --help` and the bundled `babysit-pr` workflow.
 
+POSIX command template values are assigned to generated shell variables and
+expanded as data in their shell context. Windows values are shell-quoted. POSIX
+here-documents preserve inserted values as data, including multiline values and
+text matching the original delimiter. Quoted delimiters can contain literal
+shell syntax. Unquoted documents with interpolation support simple variable
+expansions such as `$HOME` and `${HOME}`, but reject command substitutions,
+backticks, arithmetic substitutions, and compound parameter expansions. Compute
+those values in a separate command and reference its output, or pass input through
+the step's `env` and reference the variable from the shell. This restriction does
+not apply to documents without interpolation. `allowShellTemplates: true` opts
+into raw interpolation and permits input to become executable shell syntax.
+Placeholders inside arithmetic substitutions or ANSI-C quoted strings are also
+rejected in default mode, because those contexts evaluate or transform data.
+
 A typical trustworthy fix loop:
 
 ```jsonc

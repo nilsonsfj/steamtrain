@@ -17,13 +17,13 @@
  * Unknown placeholders (and stray braces) are left untouched, so prompts that
  * legitimately contain `{{` survive.
  *
- * Command steps use {@link renderCmd}, which shell-quotes interpolated values
+ * Command steps use {@link renderCmd}, which safely transports interpolated values
  * unless `allowShellTemplates` is set on the step (raw Makefile-style mode).
  */
 
 import { randomBytes } from "node:crypto";
 import { redactSecrets } from "../util/redact";
-import { type ShellQuoteContext, shellQuoteInContext } from "../util/shell-quote";
+import { type ShellQuoteContext, shellQuote, shellQuoteInContext } from "../util/shell-quote";
 import { jsonFieldText, jsonPathGet } from "./structured";
 import type {
   GateCondition,
@@ -174,16 +174,16 @@ export function renderPrompt(
 export interface RenderCmdOptions {
   /**
    * When true, interpolate template values raw (Makefile-style). Default
-   * false: values are {@link shellQuote}'d so metacharacters cannot inject
-   * shell syntax. Prefer passing data via templated `env` instead.
+   * false: POSIX values use quoted variable bindings; Windows values are
+   * shell-quoted. Prefer passing data via templated `env` instead.
    */
   allowShellTemplates?: boolean;
   platform?: NodeJS.Platform;
 }
 
 /**
- * Render a command-step `cmd` template. Interpolated values are shell-quoted
- * for the quote context they sit in (unquoted / `'…'` / `"…"`), unless
+ * Render a command-step `cmd` template. POSIX values are bound to variables
+ * and expanded in their quote context; Windows values are shell-quoted, unless
  * `allowShellTemplates` is set (opt-in raw mode for intentional full command
  * injection like `cmd: "{{inputs.testCmd}}"`).
  */
@@ -208,15 +208,15 @@ export function renderCmd(
  * unquoted frame, because the shell parses a new quoting context inside them.
  * Unquoted `#` at a word break starts a comment through the next newline.
  * `<<` / `<<-` here-documents collect a body where quotes are literal. A
- * placeholder there is inserted with the original delimiter's expansion
- * rules (escaped in an unquoted document, raw in a quoted one). The
- * delimiter is rewritten when any complete rendered line — including
- * template text already on that line — would close the document.
+ * body is rendered as a unit, with a fresh delimiter whenever data is
+ * inserted. Unquoted bodies support ordinary variable expansions; nested
+ * shell evaluation with interpolation is rejected rather than guessing its
+ * quoting context.
  */
 interface PosixFrame {
   quote: ShellQuoteContext;
   extraParens: number;
-  kind: "root" | "cmdsub" | "backtick";
+  kind: "root" | "cmdsub" | "backtick" | "arithmetic";
   pendingHeredocs: PendingHeredoc[];
 }
 
@@ -242,41 +242,34 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
   let i = 0;
   let comment = false;
   let heredoc: PendingHeredoc | undefined;
-  let atLineStart = true;
   /** True when the previous unquoted character was escaped (`foo\ #` is one word). */
   let prevEscaped = false;
+  const bindings: string[] = [];
+  const namespace = `STEAMTRAIN_DATA_${randomBytes(16).toString("hex")}`;
+  const bind = (value: string, quote: ShellQuoteContext, body = false): string => {
+    const name = `${namespace}_${bindings.length}`;
+    bindings.push(`${name}=${shellQuote(value, platform)}`);
+    const reference = `\${${name}}`;
+    if (body || quote === '"') return reference;
+    if (quote === "'") return `'"${reference}"'`;
+    return `"${reference}"`;
+  };
 
   while (i < template.length) {
     if (heredoc) {
-      if (atLineStart && atHeredocClose(template, i, heredoc)) {
-        if (heredoc.stripTabs) {
-          while (template[i] === "\t") i += 1;
-        }
-        i += heredoc.delimiter.length;
-        out += heredoc.closer ?? heredoc.delimiter;
-        heredoc = top().pendingHeredocs.shift();
-        atLineStart = false;
-        continue;
-      }
-      const ph = matchPlaceholder(template, i);
-      if (ph) {
-        const value = resolveTemplateValue(ph[1]!.trim(), ctx);
-        if (value === undefined) {
-          out += ph[0];
-        } else {
-          const after = i + ph[0].length;
-          const nl = template.indexOf("\n", after);
-          const suffix = nl === -1 ? template.slice(after) : template.slice(after, nl);
-          out = insertHeredocValue(heredoc, allHeredocs, out, redactSecrets(value), suffix);
-        }
-        i += ph[0].length;
-        atLineStart = false;
-        continue;
-      }
-      const ch = template[i]!;
-      out += ch;
-      i += 1;
-      atLineStart = ch === "\n";
+      const rendered = renderHeredocBody(
+        template,
+        i,
+        heredoc,
+        allHeredocs,
+        out,
+        ctx,
+        bind,
+        stack.some((context) => context.kind === "arithmetic"),
+      );
+      out = rendered.out;
+      i = rendered.nextI;
+      heredoc = top().pendingHeredocs.shift();
       continue;
     }
 
@@ -286,14 +279,13 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
       const value = resolveTemplateValue(ph[1]!.trim(), ctx);
       if (value === undefined) {
         out += ph[0];
-      } else if (comment) {
-        // A newline would end the comment and execute the rest of the value.
-        out += shellQuoteInContext(redactSecrets(value).replace(/[\r\n]/g, " "), null, platform);
       } else {
-        out += shellQuoteInContext(redactSecrets(value), frame.quote, platform);
+        if (stack.some((context) => context.kind === "arithmetic")) {
+          throw new Error("Command placeholders cannot occur inside arithmetic substitutions");
+        }
+        out += bind(redactSecrets(value), comment ? null : frame.quote);
       }
       i += ph[0].length;
-      atLineStart = false;
       prevEscaped = false;
       continue;
     }
@@ -307,10 +299,7 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
       prevEscaped = false;
       if (ch === "\n") {
         comment = false;
-        atLineStart = true;
         heredoc = frame.pendingHeredocs.shift();
-      } else {
-        atLineStart = false;
       }
       continue;
     }
@@ -319,7 +308,6 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
       if (ch === "'") frame.quote = null;
       out += ch;
       i += 1;
-      atLineStart = ch === "\n";
       prevEscaped = false;
       continue;
     }
@@ -327,13 +315,11 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
     if (ch === "\\" && i + 1 < template.length) {
       if (frame.quote === null && (nxt === "\n" || nxt === "\r")) {
         i += nxt === "\r" && template[i + 2] === "\n" ? 3 : 2;
-        atLineStart = false;
         continue;
       }
       out += ch + nxt;
       i += 2;
       prevEscaped = frame.quote === null;
-      atLineStart = false;
       continue;
     }
 
@@ -342,7 +328,6 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
         frame.quote = null;
         out += ch;
         i += 1;
-        atLineStart = false;
         prevEscaped = false;
         continue;
       }
@@ -350,7 +335,6 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
       frame.quote = ch;
       out += ch;
       i += 1;
-      atLineStart = false;
       prevEscaped = false;
       continue;
     }
@@ -359,7 +343,22 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
       comment = true;
       out += ch;
       i += 1;
-      atLineStart = false;
+      prevEscaped = false;
+      continue;
+    }
+
+    if (frame.quote === null && ch === "$" && nxt === "'") {
+      let end = i + 2;
+      while (end < template.length && template[end] !== "'") {
+        const ph = matchPlaceholder(template, end);
+        if (ph && resolveTemplateValue(ph[1]!.trim(), ctx) !== undefined) {
+          throw new Error("Command placeholders cannot occur inside ANSI-C quoted strings");
+        }
+        end += template[end] === "\\" ? 2 : 1;
+      }
+      if (end >= template.length) throw new Error("Unterminated ANSI-C quoted string");
+      out += template.slice(i, end + 1);
+      i = end + 1;
       prevEscaped = false;
       continue;
     }
@@ -367,8 +366,7 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
     if (ch === "$" && nxt === "(") {
       out += "$(";
       i += 2;
-      stack.push(newFrame("cmdsub"));
-      atLineStart = false;
+      stack.push(newFrame(template[i] === "(" ? "arithmetic" : "cmdsub"));
       prevEscaped = false;
       continue;
     }
@@ -376,7 +374,6 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
     if (ch === "`") {
       out += ch;
       i += 1;
-      atLineStart = false;
       prevEscaped = false;
       if (frame.kind === "backtick" && frame.quote === null) stack.pop();
       else stack.push(newFrame("backtick"));
@@ -387,7 +384,6 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
       const parsed = consumeHeredocOpener(template, i, out.length);
       out += parsed.emitted;
       i = parsed.nextI;
-      atLineStart = false;
       prevEscaped = false;
       if (parsed.doc) {
         frame.pendingHeredocs.push(parsed.doc);
@@ -396,12 +392,11 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
       continue;
     }
 
-    if (frame.kind === "cmdsub" && frame.quote === null) {
+    if ((frame.kind === "cmdsub" || frame.kind === "arithmetic") && frame.quote === null) {
       if (ch === "(") {
         frame.extraParens += 1;
         out += ch;
         i += 1;
-        atLineStart = false;
         prevEscaped = false;
         continue;
       }
@@ -410,7 +405,6 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
         else stack.pop();
         out += ch;
         i += 1;
-        atLineStart = false;
         prevEscaped = false;
         continue;
       }
@@ -420,13 +414,10 @@ function renderCmdPosix(template: string, ctx: TemplateContext, platform: NodeJS
     i += 1;
     prevEscaped = false;
     if (ch === "\n") {
-      atLineStart = true;
       heredoc = frame.pendingHeredocs.shift();
-    } else {
-      atLineStart = false;
     }
   }
-  return out;
+  return bindings.length ? `${bindings.join("\n")}\n${out}` : out;
 }
 
 function matchPlaceholder(template: string, i: number): RegExpMatchArray | null {
@@ -440,106 +431,201 @@ function isCommentStart(out: string): boolean {
   return /[\s;|&()]/.test(out[out.length - 1]!);
 }
 
-function atHeredocClose(template: string, i: number, doc: PendingHeredoc): boolean {
-  let j = i;
-  if (doc.stripTabs) {
-    while (template[j] === "\t") j += 1;
-  }
-  if (!template.startsWith(doc.delimiter, j)) return false;
-  const after = template[j + doc.delimiter.length];
-  return after === undefined || after === "\n" || after === "\r";
-}
-
 function consumeHeredocOpener(
   template: string,
   start: number,
   outLen: number,
-): { nextI: number; emitted: string; doc?: PendingHeredoc } {
-  let pos = start + 2; // skip <<
-  let stripTabs = false;
-  if (template[pos] === "-") {
-    stripTabs = true;
-    pos += 1;
-  }
-  while (template[pos] === " " || template[pos] === "\t") pos += 1;
+): { nextI: number; emitted: string; doc: PendingHeredoc } {
+  let pos = start + 2;
+  const stripTabs = template[pos] === "-";
+  if (stripTabs) pos++;
+  while (template[pos] === " " || template[pos] === "\t") pos++;
   const delimStart = pos;
   let delimiter = "";
   let quoted = false;
-  if (template[pos] === "'" || template[pos] === '"') {
-    quoted = true;
-    const q = template[pos]!;
-    pos += 1;
-    while (pos < template.length && template[pos] !== q && template[pos] !== "\n") {
-      delimiter += template[pos];
-      pos += 1;
+  let quote: ShellQuoteContext = null;
+  while (pos < template.length) {
+    const ch = template[pos]!;
+    if (quote === null && ch === "$" && (template[pos + 1] === "'" || template[pos + 1] === '"')) {
+      throw new Error("ANSI-C and locale-quoted here-document delimiters are not supported");
     }
-    if (template[pos] === q) pos += 1;
-  } else {
-    while (pos < template.length && template[pos] !== "\n" && !/[\s;|&()<>]/.test(template[pos]!)) {
-      if (template[pos] === "\\") {
-        quoted = true;
-        pos += 1;
-        if (pos < template.length) {
-          delimiter += template[pos];
-          pos += 1;
+    if (quote === null && /[\s;|&()<>]/.test(ch)) break;
+    if (ch === "\n") throw new Error("Multiline here-document delimiters are not supported");
+    if (quote === "'") {
+      if (ch === "'") quote = null;
+      else delimiter += ch;
+      pos++;
+    } else if (ch === "\\" && template[pos + 1] !== undefined) {
+      const next = template[pos + 1]!;
+      if (quote === null || /[\\$`"\n]/.test(next)) {
+        if (next !== "\n") {
+          delimiter += next;
+          quoted = true;
         }
+        pos += 2;
       } else {
-        delimiter += template[pos];
-        pos += 1;
+        delimiter += ch;
+        pos++;
       }
+    } else if (ch === quote) {
+      quote = null;
+      pos++;
+    } else if (quote === null && (ch === "'" || ch === '"')) {
+      quote = ch;
+      quoted = true;
+      pos++;
+    } else {
+      delimiter += ch;
+      pos++;
     }
   }
-  const emitted = template.slice(start, pos);
-  if (!delimiter) return { nextI: pos, emitted };
-  const prefixLen = delimStart - start;
+  if (quote !== null || pos === delimStart) throw new Error("Invalid here-document delimiter");
+  if (delimiter.includes("{{"))
+    throw new Error("Here-document delimiters cannot contain placeholders");
   return {
     nextI: pos,
-    emitted,
+    emitted: template.slice(start, pos),
     doc: {
       delimiter,
       stripTabs,
       quoted,
-      delimOutStart: outLen + prefixLen,
-      delimOutEnd: outLen + emitted.length,
+      delimOutStart: outLen + delimStart - start,
+      delimOutEnd: outLen + pos - start,
     },
   };
 }
 
-function insertHeredocValue(
+function heredocLine(
+  text: string,
+  start: number,
+  doc: PendingHeredoc,
+): { line: string; end: number; newline: boolean } {
+  let pos = start;
+  let line = "";
+  while (true) {
+    const nl = text.indexOf("\n", pos);
+    const end = nl === -1 ? text.length : nl;
+    let part = text.slice(pos, end);
+    if (doc.stripTabs) part = part.replace(/^\t+/, "");
+    const slashes = part.match(/\\+$/)?.[0].length ?? 0;
+    if (!doc.quoted && nl !== -1 && slashes % 2 === 1) {
+      line += part.slice(0, -1);
+      pos = nl + 1;
+      continue;
+    }
+    return { line: line + part, end: nl === -1 ? end : end + 1, newline: nl !== -1 };
+  }
+}
+
+function validateHeredocExpansions(body: string): void {
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i];
+    if (ch === "\\" && /[\\$`\n]/.test(body[i + 1] ?? "")) {
+      i++;
+      continue;
+    }
+    if (ch === "`" || (ch === "$" && body[i + 1] === "(")) {
+      throw new Error(
+        "Interpolated here-documents cannot contain command substitutions; use a separate command or a quoted delimiter",
+      );
+    }
+    if (ch === "$" && matchPlaceholder(body, i + 1)) continue;
+    if (ch === "$" && body[i + 1] === "{") {
+      const end = body.indexOf("}", i + 2);
+      const name = body.slice(i + 2, end);
+      if (end === -1 || !/^(?:#?[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[@*#?$!_-])$/.test(name)) {
+        throw new Error("Interpolated here-documents support only simple variable expansions");
+      }
+      i = end;
+    }
+  }
+}
+
+function renderHeredocBody(
+  template: string,
+  start: number,
   doc: PendingHeredoc,
   all: PendingHeredoc[],
   out: string,
-  value: string,
-  suffix: string,
-): string {
-  const closer = doc.closer ?? doc.delimiter;
-  const lineStart = out.lastIndexOf("\n") + 1;
-  const prefix = out.slice(lineStart);
-  const rendered = prefix + value + suffix;
-  const next = valueClosesHeredoc(rendered, closer, doc.stripTabs)
-    ? rewriteHeredocOpener(doc, all, out, rendered)
-    : out;
-  return next + (doc.quoted ? value : value.replace(/[\\$`]/g, (ch) => `\\${ch}`));
-}
-
-function valueClosesHeredoc(value: string, delimiter: string, stripTabs: boolean): boolean {
-  for (const line of value.split(/\r?\n/)) {
-    const candidate = stripTabs ? line.replace(/^\t+/, "") : line;
-    if (candidate === delimiter) return true;
+  ctx: TemplateContext,
+  bind: (value: string, quote: ShellQuoteContext, body?: boolean) => string,
+  inArithmetic: boolean,
+): { out: string; nextI: number } {
+  let pos = start;
+  let closeStart = start;
+  let closeNewline = false;
+  while (true) {
+    const logical = heredocLine(template, pos, doc);
+    if (logical.line === doc.delimiter) {
+      closeStart = pos;
+      pos = logical.end;
+      closeNewline = logical.newline;
+      break;
+    }
+    if (!logical.newline) throw new Error("Unterminated here-document");
+    pos = logical.end;
   }
-  return false;
+  const originalBody = template.slice(start, closeStart);
+  let body = "";
+  for (let offset = 0; offset < originalBody.length; ) {
+    const logical = heredocLine(originalBody, offset, doc);
+    body += logical.line + (logical.newline ? "\n" : "");
+    offset = logical.end;
+  }
+  if (doc.quoted) body = originalBody;
+  let rendered = "";
+  let inserted = false;
+  for (let i = 0; i < body.length; ) {
+    const ph = matchPlaceholder(body, i);
+    const value = ph ? resolveTemplateValue(ph[1]!.trim(), ctx) : undefined;
+    if (ph && value !== undefined) {
+      if (inArithmetic) {
+        throw new Error("Command placeholders cannot occur inside arithmetic substitutions");
+      }
+      const data = redactSecrets(value);
+      if (!doc.quoted) {
+        const variable = rendered.match(/\$([A-Za-z_][A-Za-z0-9_]*|[0-9]|[@*#?$!_-])?$/);
+        if (variable) {
+          const dollar = rendered.length - variable[0].length;
+          const slashes = rendered.slice(0, dollar).match(/\\+$/)?.[0].length ?? 0;
+          if (slashes % 2 === 0) {
+            rendered = rendered.slice(0, dollar) + (variable[1] ? `\${${variable[1]}}` : "\\$");
+          }
+        }
+      }
+      if (!doc.quoted && (rendered.match(/\\+$/)?.[0].length ?? 0) % 2 === 1) {
+        rendered += "\\";
+      }
+      rendered += doc.quoted ? data : bind(data, null, true);
+      inserted = true;
+      i += ph[0].length;
+    } else {
+      rendered += body[i]!;
+      i++;
+    }
+  }
+  if (!inserted) return { out: out + originalBody + template.slice(closeStart, pos), nextI: pos };
+  if (!doc.quoted) validateHeredocExpansions(body);
+  const prefix = rewriteHeredocOpener(doc, all, out, rendered);
+  return { out: prefix + rendered + doc.closer + (closeNewline ? "\n" : ""), nextI: pos };
 }
 
 function rewriteHeredocOpener(
   doc: PendingHeredoc,
   all: PendingHeredoc[],
   out: string,
-  rendered: string,
+  body: string,
 ): string {
-  let unique = `STEAMTRAIN_EOF_${randomBytes(16).toString("hex")}`;
-  while (valueClosesHeredoc(rendered, unique, doc.stripTabs)) {
-    unique = `STEAMTRAIN_EOF_${randomBytes(16).toString("hex")}`;
+  const lines = new Set<string>();
+  for (let pos = 0; pos < body.length; ) {
+    const logical = heredocLine(body, pos, doc);
+    lines.add(logical.line);
+    pos = logical.end;
   }
+  let unique: string;
+  do {
+    unique = `STEAMTRAIN_EOF_${randomBytes(16).toString("hex")}`;
+  } while (lines.has(unique));
   const replacement = doc.quoted ? `'${unique}'` : unique;
   const origEnd = doc.delimOutEnd;
   const delta = replacement.length - (origEnd - doc.delimOutStart);

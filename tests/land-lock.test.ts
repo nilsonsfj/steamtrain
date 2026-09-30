@@ -88,27 +88,22 @@ describe("withLandLock", () => {
     expect(result).toMatchObject({ value: "stolen", locked: true });
   });
 
-  it("steals a stale lock held by another host (pid liveness is unknowable there)", async () => {
+  it("does not claim ownership of an expired lock on an unverifiable host", async () => {
     const lockDir = await scratchDir();
     const lockPath = lockFileFor(lockDir, "test-repo-key");
-    // A LIVE pid, but claimed by a different machine — the dead-pid check must
-    // not apply, so only the mtime-staleness path can reclaim this.
-    await writeFile(
-      lockPath,
-      JSON.stringify({ pid: process.pid, host: "other-machine", createdAtMs: 0 }),
-    );
-    // Backdate the file so it is comfortably older than staleMs.
+    const payload = JSON.stringify({ pid: process.pid, host: "other-machine", createdAtMs: 0 });
+    await writeFile(lockPath, payload);
     const old = new Date(Date.now() - 60 * 60_000);
     await utimes(lockPath, old, old);
-
-    const result = await withLandLock("/repo", async () => "stolen-stale", {
+    const result = await withLandLock("/repo", async () => "ran-unlocked", {
       lockDir,
       resolveKey: fixedKey,
       pollMs: 3,
-      maxWaitMs: 2_000,
+      maxWaitMs: 40,
       staleMs: 60_000,
     });
-    expect(result).toMatchObject({ value: "stolen-stale", locked: true });
+    expect(result).toMatchObject({ value: "ran-unlocked", locked: false });
+    expect(await readFile(lockPath, "utf8")).toBe(payload);
   });
 
   it("does not steal a FRESH lock held by another host", async () => {
