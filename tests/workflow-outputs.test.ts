@@ -164,6 +164,32 @@ describe("workflow outputs: validation", () => {
 });
 
 describe("workflow outputs: lint of step kind and field", () => {
+  it("lints a prompt's json and artifact refs in the order the renderer resolves them", () => {
+    const spec: WorkflowSpec = {
+      name: "hunt",
+      phases: [
+        {
+          id: "p",
+          title: "P",
+          steps: [
+            { id: "a", kind: "command", cmd: "true" },
+            {
+              id: "b",
+              kind: "consolidator",
+              dependsOn: ["a"],
+              // A field of a's JSON, valid; and an artifact named "output", which a
+              // does not declare.
+              prompt: "{{steps.a.json.ok}} {{steps.a.artifacts.output}}",
+            },
+          ],
+        },
+      ],
+    };
+    expect(lintTemplateRefs(spec)).toEqual([
+      "step 'b' references 'a.artifacts.output' but 'a' has no declared artifacts",
+    ]);
+  });
+
   it("warns when two outputs write to the same literal path", () => {
     const spec = reportSpec({
       report: { value: "{{steps.report.output}}", path: "reports/latest.md" },
@@ -793,7 +819,9 @@ describe("workflow outputs: the CLI", () => {
     const history = await runCliText(["workflow", "history"]);
     const id = /\b([0-9a-f-]{36})\b/.exec(history)?.[1] ?? "";
     const shown = await runCliText(["workflow", "history", "show", id]);
-    expect(shown).toContain("output:   not saved report: step 'report' failed");
+    expect(shown).toMatch(
+      /output: {3}not saved report: step 'report' failed \(for \.steamtrain\/outputs\/fails\/[\d_-]+\/report\.md\)/,
+    );
   });
 
   it("writes an output where --out sends it", async () => {
@@ -871,9 +899,11 @@ describe("workflow outputs: the CLI", () => {
     expect(good.code).toBe(0);
     await expect(readFile(join(dir, "notes", "bugs.md"), "utf8")).rejects.toThrow();
 
-    const unknown = await cli(["--out", "summary=x.md", "--dry-run"]);
+    const unknown = await cli(["--out", "summary=x.md", "--out", "log=y.md", "--dry-run"]);
     expect(unknown.code).toBe(1);
+    // Every bad key, as the real run reports them.
     expect(unknown.stderr).toContain("declares no output 'summary'");
+    expect(unknown.stderr).toContain("declares no output 'log'");
 
     for (const bad of ["report", "report=", "-x=y.md"]) {
       const malformed = await cli(["--out", bad, "--dry-run"]);

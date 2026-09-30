@@ -8,6 +8,7 @@ import {
   workflowReducer,
   workflowStateFromSpec,
 } from "../src/workflow";
+import { arrivalOutputLines } from "../src/workflow/arrival-report";
 
 function report(ok = true, outputs: ArrivalReport["outputs"] = []): ArrivalReport {
   return {
@@ -96,6 +97,25 @@ describe("ArrivalReportView: many outputs", () => {
     expect(frame).not.toContain("out6.md");
     expect(frame).toContain("… 6 more (workflow history show)");
     expect(frame).toContain("Ride again");
+  });
+});
+
+describe("arrivalOutputLines: a not-saved output", () => {
+  it("says where it would have gone, unless the reason already names the path", () => {
+    expect(
+      arrivalOutputLines(
+        [
+          { key: "a", written: false, error: "step 'x' failed", path: "/w/out/a.md" },
+          { key: "b", written: false, error: "EISDIR: /w/out/b.md", path: "/w/out/b.md" },
+          { key: "c", written: false, error: "the run was handed to a background runner" },
+        ],
+        "/w",
+      ),
+    ).toEqual([
+      "not saved a: step 'x' failed (for out/a.md)",
+      "not saved b: EISDIR: /w/out/b.md",
+      "not saved c: the run was handed to a background runner",
+    ]);
   });
 });
 

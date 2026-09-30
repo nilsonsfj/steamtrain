@@ -609,7 +609,8 @@ function dryRunOutIssue(
   }
   const spec = name && !name.startsWith("--") ? orchestrator.listWorkflows()[name] : undefined;
   // An unknown workflow is the plan's own error to report.
-  return spec && name ? undeclaredOutputMessages(name, spec, paths)[0] : undefined;
+  const undeclared = spec && name ? undeclaredOutputMessages(name, spec, paths) : [];
+  return undeclared.length > 0 ? undeclared.join("\n") : undefined;
 }
 
 function parsePlanOptions(args: string[]): PlanOptions | null {

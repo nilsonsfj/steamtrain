@@ -1045,9 +1045,13 @@ var SteamtrainReducer = (() => {
   function arrivalOutputLines(outputs, cwd) {
     const root = cwd?.replace(/[\\/]+$/, "");
     return outputs.map((output) => {
-      if (!output.written) return `not saved ${output.key}: ${output.error ?? "unknown reason"}`;
       const path = output.path ?? "";
       const shown = root && (path.startsWith(`${root}/`) || path.startsWith(`${root}\\`)) ? path.slice(root.length + 1) : path;
+      if (!output.written) {
+        const reason = output.error ?? "unknown reason";
+        const where = shown && !reason.includes(path) ? ` (for ${shown})` : "";
+        return `not saved ${output.key}: ${reason}${where}`;
+      }
       return `saved ${output.key} \u2192 ${shown}`;
     });
   }

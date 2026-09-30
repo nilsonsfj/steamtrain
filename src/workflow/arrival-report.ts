@@ -507,9 +507,9 @@ export function arrivalReceiptCards(receipt: ArrivalReceipt): Array<{
 }
 
 /**
- * One line per declared output: where it was saved, or why it was not. A path
- * inside `cwd` is shown relative to it. Plain string work, no `node:path`, so
- * the browser bundle can use it too.
+ * One line per declared output: where it was saved, or why it was not and
+ * where it would have gone. A path inside `cwd` is shown relative to it. Plain
+ * string work, no `node:path`, so the browser bundle can use it too.
  */
 export function arrivalOutputLines(
   outputs: readonly WorkflowOutputResult[],
@@ -517,12 +517,17 @@ export function arrivalOutputLines(
 ): string[] {
   const root = cwd?.replace(/[\\/]+$/, "");
   return outputs.map((output) => {
-    if (!output.written) return `not saved ${output.key}: ${output.error ?? "unknown reason"}`;
     const path = output.path ?? "";
     const shown =
       root && (path.startsWith(`${root}/`) || path.startsWith(`${root}\\`))
         ? path.slice(root.length + 1)
         : path;
+    if (!output.written) {
+      const reason = output.error ?? "unknown reason";
+      // The reason of a filesystem failure usually names the path already.
+      const where = shown && !reason.includes(path) ? ` (for ${shown})` : "";
+      return `not saved ${output.key}: ${reason}${where}`;
+    }
     return `saved ${output.key} → ${shown}`;
   });
 }

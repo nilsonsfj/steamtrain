@@ -468,60 +468,34 @@ export function lintTemplateRefs(spec: WorkflowSpec): string[] {
 
         // {{steps.<id>.<field>}}
         if (!ref.startsWith("steps.")) continue;
-        const stepFieldMatch = STEP_FIELD.exec(ref);
-        if (stepFieldMatch) {
-          const refId = stepFieldMatch[1] as string;
-          const field = stepFieldMatch[2] as string;
+        // Classified in the order the renderer resolves it, so `steps.a.json.ok`
+        // is a field of a's JSON and not an unknown step "a.json".
+        const read = referencedStep(ref);
+        if (read) {
+          const refId = read.id;
           if (!stepIds.has(refId)) {
             warnings.push(`step '${step.id}' references unknown step '${refId}'`);
-          } else if (field === "exitCode") {
+          } else if (read.kind === "field" && read.field === "exitCode") {
             const refStep = findStep(spec, refId);
             if (refStep && !isCommandStep(refStep)) {
               warnings.push(
                 `step '${step.id}' references '${refId}.exitCode' but '${refId}' is not a command step (exitCode is only available on command steps)`,
               );
             }
-          }
-          continue;
-        }
-
-        const worktreeMatch = STEP_WORKTREE_FIELD.exec(ref);
-        if (worktreeMatch) {
-          const refId = worktreeMatch[1] as string;
-          if (!stepIds.has(refId)) {
-            warnings.push(`step '${step.id}' references unknown step '${refId}'`);
-          } else {
+          } else if (read.kind === "worktree") {
             const refStep = findStep(spec, refId);
             if (refStep && !hasWorkspace(refStep)) {
               warnings.push(
-                `step '${step.id}' references '${refId}.worktree.${worktreeMatch[2]}' but '${refId}' does not have workspace isolation (only worker, processor, and command steps — or a merge step with mode "worktree" — have worktrees)`,
+                `step '${step.id}' references '${refId}.worktree.${read.field}' but '${refId}' does not have workspace isolation (only worker, processor, and command steps — or a merge step with mode "worktree" — have worktrees)`,
               );
             }
-          }
-          continue;
-        }
-
-        const artifactMatch = STEP_ARTIFACT_FIELD.exec(ref);
-        if (artifactMatch) {
-          const refId = artifactMatch[1] as string;
-          if (!stepIds.has(refId)) {
-            warnings.push(`step '${step.id}' references unknown step '${refId}'`);
-          } else {
+          } else if (read.kind === "artifact") {
             const refStep = findStep(spec, refId);
             if (refStep && !hasArtifacts(refStep)) {
               warnings.push(
-                `step '${step.id}' references '${refId}.artifacts.${artifactMatch[2]}' but '${refId}' has no declared artifacts`,
+                `step '${step.id}' references '${refId}.artifacts.${read.field}' but '${refId}' has no declared artifacts`,
               );
             }
-          }
-          continue;
-        }
-
-        const jsonMatch = STEP_JSON_FIELD.exec(ref);
-        if (jsonMatch) {
-          const refId = jsonMatch[1] as string;
-          if (!stepIds.has(refId)) {
-            warnings.push(`step '${step.id}' references unknown step '${refId}'`);
           }
           continue;
         }
