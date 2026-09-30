@@ -292,7 +292,7 @@ and web UI show the path when the run ends.
   the directory the run starts in. `--dry-run` ignores `--out`, as it does the
   other run-only flags: a plan writes nothing. It refuses the flags that only
   apply to resuming a run (`--from`, `--retry-failed`, `--step`,
-  `--retarget-*`), which the real run refuses without `--from --retry-failed`.
+  `--retarget-*`), naming them: a resume has no plan to preview.
 
 Output files are kept. History keeps only the latest runs, and
 `workflow history clear` deletes the records, but neither removes the files

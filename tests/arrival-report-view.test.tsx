@@ -99,6 +99,26 @@ describe("ArrivalReportView: many outputs", () => {
   });
 });
 
+describe("ArrivalReportView: a very short screen", () => {
+  it("drops the output lines rather than overflowing by a row", () => {
+    const outputs = [{ key: "report", written: true, path: "/work/app/report.md" }];
+    const frame = (height: number) =>
+      render(
+        <ArrivalReportView
+          report={report(true, outputs)}
+          width={80}
+          height={height}
+          cwd="/work/app"
+        />,
+      ).lastFrame() ?? "";
+    // Height 7 is chrome (6) plus one body row: no room left for an output line.
+    expect(frame(7)).not.toContain("report.md");
+    expect(frame(7).split("\n").length).toBeLessThanOrEqual(7);
+    // One row more and it fits.
+    expect(frame(8)).toContain("saved report → report.md");
+  });
+});
+
 describe("WorkflowView: the run's directory", () => {
   it("shows saved paths relative to the directory the run ran in", () => {
     let state = workflowStateFromSpec({
