@@ -240,6 +240,11 @@ export interface WebServerDeps {
    * Reload defaults → user → project into {@link config} + {@link configLayers}
    * after a scoped save. Required so the live orchestrator sees merged state.
    */
+  /**
+   * Re-read config from disk. Production must supply it: the reload goes through
+   * `loadConfig`'s trust filter, whereas the fallback in the settings-save path
+   * (used by unit tests) assigns the saved layers without it.
+   */
   reloadConfig?: () => void;
   /**
    * When set, all API routes require a valid `__steamtrain_auth` session cookie.

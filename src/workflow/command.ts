@@ -177,6 +177,10 @@ export async function runShellCommand(
       spawnError = err instanceof Error ? err.message : String(err);
       finish(undefined);
     });
+    // Contract: the step ends with the shell. A background process that still
+    // holds the output pipes is terminated (below); one that redirected its own
+    // stdio (`cmd >/dev/null 2>&1 &`, `nohup …`) is a deliberate daemon and is
+    // left running, since the pipes give no signal that it is unwanted.
     child.on("exit", (code) => {
       // A backgrounded grandchild can keep stdout/stderr open after the shell
       // exits, so 'close' never fires. Wait briefly, then terminate the group

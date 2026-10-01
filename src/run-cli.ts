@@ -1216,18 +1216,24 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<Drive
   } catch (runErr) {
     const status: RunRecordStatus = ac.signal.aborted ? "canceled" : "error";
     const error = status === "error" ? message(runErr) : undefined;
-    if (publisher) {
-      await publisher.finish(status, { ok: false, error, timedOut });
-    } else {
-      await store.update(runId, {
-        status,
-        ok: false,
-        error,
-        timedOut: timedOut || undefined,
-        endedAt: Date.now(),
-      });
+    // Settling the live record is best-effort here: a failure must neither
+    // replace `runErr` nor skip the history record of the run that just ended.
+    try {
+      if (publisher) {
+        await publisher.finish(status, { ok: false, error, timedOut });
+      } else {
+        await store.update(runId, {
+          status,
+          ok: false,
+          error,
+          timedOut: timedOut || undefined,
+          endedAt: Date.now(),
+        });
+      }
+      settled = true;
+    } catch {
+      // `finally` below makes one more attempt to settle the meta.
     }
-    settled = true;
     const record = await saveHistory(historyStore, recorder, status, err, error, timedOut);
     if (status === "canceled") {
       const outcome = record ? classifyRun(record, { timedOut }) : "canceled";
