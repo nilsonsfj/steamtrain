@@ -236,17 +236,23 @@ The web UI is a **privileged control plane**: whoever reaches it can launch
 agent runs with your credentials, edit and delete workflows, and read run
 history. The server hardens both of its modes accordingly.
 
-**Local mode (the default).** `steamtrain --web-ui` binds `127.0.0.1` and
-needs no token — the frictionless path. It still defends against the two ways
-a hostile *website* can reach a localhost server through your browser:
+**Local mode (the default).** `steamtrain --web-ui` binds `127.0.0.1` and,
+like every mode, requires a token: one is generated and printed at startup
+(open the printed `?token=` URL, which the page exchanges for a session and
+strips from the address bar). Other local processes — a shared machine, a
+script, a browser extension — can reach `127.0.0.1` too, so loopback is not
+treated as trusted. Local scripts must authenticate (`POST /api/auth`, or
+pass your own `--auth-token`); unauthenticated `/api/*` calls get `401`. On a
+single-user machine you can opt out with `--no-auth`. The server also
+defends against the two ways a hostile *website* can reach a localhost
+server through your browser:
 
 - **DNS rebinding** — requests whose `Host` header is not a loopback name
   (`localhost`, `127.0.0.1`, `[::1]`, or the bind host) are rejected with
   `403`, so a domain rebound to `127.0.0.1` gets nothing.
 - **Drive-by CSRF** — state-changing requests carrying a cross-origin
-  `Origin`/`Referer` are rejected in every mode. Browsers always attach
-  `Origin` to cross-site fetches, while `curl`-style local scripting (which
-  sends neither header) keeps working untouched.
+  `Origin`/`Referer` are rejected in every mode, since browsers always attach
+  `Origin` to cross-site fetches.
 
 **Exposed mode.** Binding a non-loopback host (`--host 0.0.0.0`, a LAN
 address, …) requires authentication. If you don't pass a token, one is

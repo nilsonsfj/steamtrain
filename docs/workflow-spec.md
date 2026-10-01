@@ -896,7 +896,12 @@ the step's `env` and reference the variable from the shell. This restriction doe
 not apply to documents without interpolation. `allowShellTemplates: true` opts
 into raw interpolation and permits input to become executable shell syntax.
 Placeholders inside arithmetic substitutions or ANSI-C quoted strings are also
-rejected in default mode, because those contexts evaluate or transform data.
+rejected in default mode, because those contexts evaluate or transform data. The
+same applies to every other arithmetic context bash evaluates (`${v:off:len}`,
+array subscripts, `$[…]`, `((…))`, `[[ … -eq … ]]`, `let`, `declare -i`). The
+renderer cannot see inside a nested script that you write yourself, such as
+`sh -c '…'` or `eval`: data placed in one is re-parsed by the inner shell, so
+pass it through `env` and reference the variable there instead.
 
 A typical trustworthy fix loop:
 
