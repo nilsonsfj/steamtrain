@@ -8,7 +8,9 @@ runs could collide over the step cache and git worktrees. This feature makes
 runs first-class background citizens:
 
 - **Detached runs** — `steamtrain workflow run … --detach` executes under a
-  background process that survives the launching terminal.
+  background process that survives the launching terminal. The runner writes
+  the workflow's declared `outputs` when the run ends, to the `--out` paths
+  given at launch (they travel in the run's launch metadata).
 - **Attach from any UI** — the CLI (`workflow attach`), the TUI (`/attach`,
   the run browser), and the web UI (the *Active runs* sidebar) can all replay
   an in-flight run's record so far and then tail it live — regardless of which

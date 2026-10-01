@@ -33,7 +33,7 @@ import {
   workflowPermissionPreflight,
 } from "../workflow";
 import type { PlanRerouteOptions, PlanRerouteResult } from "../workflow";
-import type { RunRecord } from "../workflow";
+import type { RunRecord, WorkflowOutputResult } from "../workflow";
 import type { ApprovalProvider, HumanInputProvider, WorkflowRunControl } from "../workflow";
 import type { WorkspaceConfig, WorkspaceEntry, WorkspaceId } from "../workspace";
 import { workspaceById } from "../workspace";
@@ -47,6 +47,23 @@ export interface ResolvedWorkspace {
 }
 
 export type DispatchCheck = { ok: true } | { ok: false; reason: string };
+
+/** The knobs of {@link Orchestrator.runWorkflow} that only some callers set. */
+export interface RunWorkflowOptions {
+  /**
+   * Per-run override of the configured `maxConcurrency` (the launch sheet's
+   * "Max parallel runners"). Falls back to config, then the default.
+   */
+  maxConcurrency?: number;
+  /** Where this run writes the workflow's declared outputs (`--out`), by key. */
+  outputPaths?: Record<string, string>;
+  /** When the run started, if not now: a handed-off run keeps its first owner's start. */
+  startedAt?: number;
+  /** See {@link WorkflowRunContext.onOutputsDeferred}: for a host that can hand a run off. */
+  onOutputsDeferred?: (write: () => Promise<WorkflowOutputResult[]>) => void;
+  /** Live-run id; worktrees are named under this so a crash can reclaim them. */
+  runId?: string;
+}
 
 /**
  * Routes workspace dispatches to the right adapter + model, gates on doctor
@@ -355,21 +372,16 @@ export class Orchestrator {
     approval?: ApprovalProvider,
     control?: WorkflowRunControl,
     humanInput?: HumanInputProvider,
-    /**
-     * Per-run override of the configured `maxConcurrency` (the launch sheet's
-     * "Max parallel runners"). Falls back to config, then the default.
-     */
-    maxConcurrency?: number,
-    /** Live-run id; worktrees are named under this so a crash can reclaim them. */
-    runId?: string,
+    options: RunWorkflowOptions = {},
   ): AsyncIterable<WorkflowEvent> {
+    const { maxConcurrency, outputPaths, startedAt, onOutputsDeferred, runId } = options;
     const spec = specOverride ?? this.listWorkflows()[name];
     if (!spec) throw new Error(`unknown workflow '${name}'`);
 
     const agentWorkspace = createGitWorktreeManager({ runId });
     const events = runWorkflow(
       spec,
-      { input, cache, inputs },
+      { input, cache, inputs, outputPaths, startedAt, onOutputsDeferred },
       {
         createAdapter,
         binaries: this.config.binaries,

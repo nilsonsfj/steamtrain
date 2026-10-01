@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import { renderCmd } from "../src/workflow/template";
 
 function run(template: string, input: string): string {
+  // bash, not sh: several cases (ANSI-C quotes, `[[`, array and offset
+  // expansions) are bash syntax, and `sh` is dash on Linux CI.
   return execFileSync(
-    "sh",
+    "bash",
     ["-c", renderCmd(template, { input, outputs: new Map() }, { platform: "linux" })],
     {
       encoding: "utf8",

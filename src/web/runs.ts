@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { SteamtrainConfig } from "../config";
+import type { RunWorkflowOptions } from "../orchestrator/orchestrator";
 import {
   type ApprovalDecision,
   type ApprovalProvider,
@@ -15,6 +16,7 @@ import {
   type PlanRerouteOptions,
   type PlanRerouteResult,
   type PlanRetryRetargetResult,
+  RUN_HANDOFF_ABORT,
   type RerunMode,
   type RerunPlan,
   type RetryRetargetOptions,
@@ -28,6 +30,7 @@ import {
   type WorkflowCacheStore,
   type WorkflowEvent,
   type WorkflowHistoryStore,
+  type WorkflowOutputResult,
   type WorkflowRunControl,
   type WorkflowSpec,
   acquireRunSlot,
@@ -92,10 +95,8 @@ export interface WorkflowHost {
     approval?: ApprovalProvider,
     control?: WorkflowRunControl,
     humanInput?: HumanInputProvider,
-    /** Per-run cap on parallel steps ("Max parallel runners"); config default when omitted. */
-    maxConcurrency?: number,
-    /** Live-run id; worktrees are named under this so a crash can reclaim them. */
-    runId?: string,
+    /** Per-run knobs; `maxConcurrency` is the launch sheet's "Max parallel runners". */
+    options?: RunWorkflowOptions,
   ): AsyncIterable<WorkflowEvent>;
 }
 
@@ -186,6 +187,13 @@ interface Run {
    * a terminal outcome.
    */
   handoffCommitted?: boolean;
+  /**
+   * Writes the run's outputs here, offered by the engine when it skipped them
+   * for a hand-off. Used only if that hand-off fails and no runner will.
+   */
+  deferredOutputs?: () => Promise<WorkflowOutputResult[]>;
+  /** What that write produced, for the history record. */
+  outputs?: WorkflowOutputResult[];
 }
 
 interface PendingInputRegistration {
@@ -571,6 +579,8 @@ export class WorkflowRunManager {
         workflow: run.workflow,
         input: run.input,
         params: run.params,
+        // No `outputPaths`: only a CLI `--out` run has them, and the web UI
+        // hands off only the runs it started itself.
         fresh: false,
       },
     };
@@ -578,7 +588,7 @@ export class WorkflowRunManager {
     // Commit before aborting so a final event or abort-time exception cannot
     // race the run into its normal terminal path.
     run.handoffCommitted = true;
-    run.controller.abort();
+    run.controller.abort(RUN_HANDOFF_ABORT);
     return { ok: true };
   }
 
@@ -608,6 +618,8 @@ export class WorkflowRunManager {
     if (!spawned.ok) {
       run.status = "error";
       run.error = `detach failed: ${spawned.error}`;
+      // No runner will write the outputs the engine held back, so write them here.
+      run.outputs = await run.deferredOutputs?.().catch(() => undefined);
       return false;
     }
     // The run is now owned by an independent process. A terminal `detached`
@@ -916,8 +928,13 @@ export class WorkflowRunManager {
         approval,
         run.control,
         humanInput,
-        opts.maxParallel,
-        run.id,
+        {
+          maxConcurrency: opts.maxParallel,
+          onOutputsDeferred: (write) => {
+            run.deferredOutputs = write;
+          },
+          runId: run.id,
+        },
       )) {
         // Mid-run detach committed: stop recording, mirroring, and emitting
         // events — the detached child owns the run's record and stream from
@@ -1045,7 +1062,13 @@ export class WorkflowRunManager {
     const status = run.status === "running" ? "done" : run.status;
     try {
       await this.historyStore.save(
-        recorder.build({ status, error: run.error, endedAt: run.endedAt, timedOut: run.timedOut }),
+        recorder.build({
+          status,
+          error: run.error,
+          endedAt: run.endedAt,
+          timedOut: run.timedOut,
+          outputs: run.outputs,
+        }),
       );
     } catch {
       // History is best-effort; a failed write must not surface to the run.

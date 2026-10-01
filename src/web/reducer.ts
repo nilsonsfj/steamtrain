@@ -15,6 +15,7 @@ export {
   formatArrivalHeadline,
   formatArrivalReceipt,
   arrivalReceiptCards,
+  arrivalOutputLines,
   arrivalRootCause,
   isCascadeVictim,
   ARRIVAL_NEXT_CANDIDATES,

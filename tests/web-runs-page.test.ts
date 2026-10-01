@@ -24,6 +24,8 @@ import {
   loadScripts,
 } from "./helpers/stub-dom";
 
+import { arrivalOutputLines } from "../src/workflow/arrival-report";
+
 const PUBLIC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "src", "web", "public");
 const runsJs = readFileSync(join(PUBLIC_DIR, "st-runs.js"), "utf8");
 const runsCss = readFileSync(join(PUBLIC_DIR, "runs.css"), "utf8");
@@ -206,6 +208,7 @@ async function mountRuns(opts: {
     Steamtrain: ST,
     SteamtrainReducer: {
       runsDeepLink: (id?: string) => (id ? `#runs/${id}` : "#runs"),
+      arrivalOutputLines,
     },
     location,
     setInterval: () => 0,
@@ -698,6 +701,40 @@ describe("runs page: the full receipt", () => {
 
     await page.clickStep("scan-logic");
     expect(page.main()).not.toContain("FOUND-A-BUG-IN-THE-TEARDOWN");
+  });
+
+  it("says where the run's outputs were saved, and why one was not", async () => {
+    const page = await openFullReceipt({
+      detail: {
+        ...DETAIL,
+        cwd: "/work/app",
+        outputs: [
+          {
+            key: "report",
+            written: true,
+            description: "The report",
+            path: "/work/app/.steamtrain/outputs/bug-hunt/2026-09-27_10-47-12/report.md",
+          },
+          { key: "log", written: false, error: "step 'check' failed" },
+        ],
+      },
+    });
+    // A saved row and a row that was not saved are styled apart, and only the
+    // saved one offers its path on hover.
+    const saved = collect(page.root, (n) => hasClass(n, "saved"));
+    const notSaved = collect(page.root, (n) => hasClass(n, "not-saved"));
+    expect(saved).toHaveLength(1);
+    expect(notSaved).toHaveLength(1);
+    expect(saved[0]?.getAttribute("title")).toBe(
+      "/work/app/.steamtrain/outputs/bug-hunt/2026-09-27_10-47-12/report.md — The report",
+    );
+    expect(notSaved[0]?.getAttribute("title")).toBeFalsy();
+    const main = page.main();
+    expect(main).toContain("Outputs");
+    expect(main).toContain(
+      "saved report → .steamtrain/outputs/bug-hunt/2026-09-27_10-47-12/report.md",
+    );
+    expect(main).toContain("not saved log: step 'check' failed");
   });
 
   it("tags the states that explain a cheap or odd step", async () => {

@@ -476,6 +476,14 @@ Example:
 Then reference in prompts: "Analyze {{inputs.repo}} with up to {{inputs.maxIterations}} passes"
 And pin a step model: "model": "{{inputs.coderModel}}"
 
+# Workflow outputs
+A workflow may declare named results in an "outputs" map, the counterpart of
+"inputs". When the run ends, each "value" template is rendered and written to
+a file (default .steamtrain/outputs/<workflow>/<timestamp>/<key>.md, or a
+relative "path"). Declare one for the result a person will want to keep, such
+as a final report:
+  "outputs": { "report": { "description": "the final report", "value": "{{steps.report.output}}" } }
+
 # Templates available in prompts/items
 {{input}} / {{args}} (the user's task), {{inputs.<key>}} (declared workflow input
 parameters — define them in the spec's "inputs" map and users pass --param key=value),

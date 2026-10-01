@@ -85,6 +85,8 @@ export interface LiveRunLaunch {
   humanInputs?: Record<string, string>;
   /** `--agent <id>`: re-route blocked agent steps to this agent (re-planned by the runner). */
   rerouteAgent?: string;
+  /** `--out`: where the run writes the workflow's declared outputs, by key. */
+  outputPaths?: Record<string, string>;
   /**
    * The exact resolved spec the run was executing, when it differs from the
    * catalog workflow — set by a mid-run detach so the background process

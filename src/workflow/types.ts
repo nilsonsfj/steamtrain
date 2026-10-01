@@ -6,7 +6,12 @@ import {
   type PermissionsSpec,
 } from "../agents/permissions";
 import type { AgentInstanceId, ApiInstanceId, TokenUsage } from "../types/events";
-import { type WorkflowInputType, isStringLikeInputType, workflowInputType } from "./input-params";
+import {
+  IDENTIFIER_RE,
+  type WorkflowInputType,
+  isStringLikeInputType,
+  workflowInputType,
+} from "./input-params";
 import type { ModelFailoverPolicy } from "./model-failover";
 import type { RetryPolicy } from "./retry";
 import {
@@ -20,7 +25,7 @@ import type { JsonSchema } from "./structured";
 // Circular import is safe: template.ts imports types from this module, and this
 // module imports lintTemplateRefs from template.ts. Both modules are fully
 // initialized before any cross-referenced function is called at runtime.
-import { lintTemplateRefs } from "./template";
+import { PLACEHOLDER, lintTemplateRefs } from "./template";
 
 export type { WorkflowInputType } from "./input-params";
 export { WORKFLOW_INPUT_TYPES, workflowInputType, isStringLikeInputType } from "./input-params";
@@ -996,6 +1001,33 @@ export interface WorkflowInputSpec {
   fallbackModels?: string[];
 }
 
+/**
+ * Declares a named result of a workflow: the counterpart of an input. When a
+ * run ends, the engine renders `value` and writes it to a file, so what the
+ * run produced lands somewhere a person can find it, not only in the run
+ * history.
+ */
+export interface WorkflowOutputSpec {
+  /** What the output is; the web UI shows it with the saved path on hover. */
+  description?: string;
+  /**
+   * Template rendered when the run ends, usually one step's output:
+   * `"{{steps.report.output}}"`. Same placeholders as a step prompt, except
+   * `{{item}}` and `{{iteration}}`. The file is written only when every step
+   * the template references finished ok; a step read only for `ok`, `error`
+   * or `exitCode` just has to have run.
+   */
+  value: string;
+  /**
+   * Where the file goes, relative to the directory the run started in, and
+   * never outside it. May use `{{inputs.<key>}}`, `{{workflow}}` and
+   * `{{run.timestamp}}` (the run's local start time, `2026-09-27_10-47-12`).
+   * Default: `.steamtrain/outputs/<workflow>/<run.timestamp>/<key>.md`. A run
+   * can send it elsewhere: `--out <key>=<path>` on the CLI.
+   */
+  path?: string;
+}
+
 export interface WorkflowSpec {
   /** Launch name; unique among available workflows. */
   name: string;
@@ -1007,6 +1039,11 @@ export interface WorkflowSpec {
    * user must provide a value or the run is rejected before it starts.
    */
   inputs?: Record<string, WorkflowInputSpec>;
+  /**
+   * Named results, written to files when the run ends (see
+   * {@link WorkflowOutputSpec}). The run history records where each went.
+   */
+  outputs?: Record<string, WorkflowOutputSpec>;
   phases: WorkflowPhase[];
   /** Default auto-retry policy applied to every agent step (per-step `retry` overrides). */
   retry?: RetryPolicy;
@@ -1484,6 +1521,12 @@ const workflowInputSpecSchema = z
     }
   });
 
+const workflowOutputSpecSchema = z.object({
+  description: z.string().optional(),
+  value: z.string().min(1),
+  path: z.string().min(1).optional(),
+});
+
 const retryPolicySchema = z.object({
   maxAttempts: z.number().int().min(1).max(10).optional(),
   initialDelayMs: z.number().int().min(0).max(60000).optional(),
@@ -1830,6 +1873,7 @@ export const workflowSpecSchema = z
     name: z.string().min(1).optional(),
     description: z.string().optional(),
     inputs: z.record(workflowInputSpecSchema).optional(),
+    outputs: z.record(workflowOutputSpecSchema).optional(),
     phases: z.array(workflowPhaseSchema).min(1),
     retry: retryPolicySchema.optional(),
     modelFailover: modelFailoverPolicySchema.optional(),
@@ -2060,6 +2104,47 @@ function stepPermissionsError(step: WorkflowStep, declared: PermissionsSpec): st
   return undefined;
 }
 
+/**
+ * True for a path (as segments) inside `.steamtrain/` other than under `.steamtrain/outputs/`:
+ * the run history, step cache and live-run state, which an output must not replace.
+ */
+export function touchesStateDir(segments: readonly string[]): boolean {
+  const [first, second, third] = segments.filter((segment) => segment !== "" && segment !== ".");
+  if (first?.toLowerCase() !== ".steamtrain") return false;
+  // `.steamtrain/outputs` itself is state too: a file there would make every
+  // later default-path output fail, having nothing to make a directory in.
+  return second?.toLowerCase() !== "outputs" || third === undefined;
+}
+
+/**
+ * Why an output's `path` template can never be written safely, or undefined.
+ * The rendered path is checked again when the run ends; this catches what is
+ * wrong with the template itself, before anything runs.
+ */
+function outputPathIssue(path: string, spec: WorkflowSpec): string | undefined {
+  if (/^([\\/]|[a-zA-Z]:)/.test(path)) {
+    return `'${path}' must be relative to the directory the run starts in`;
+  }
+  const segments = path.split(/[\\/]/);
+  if (segments.every((segment) => segment === "" || segment === ".")) {
+    return `'${path}' must name a file`;
+  }
+  if (segments.includes("..")) return `'${path}' must not climb out with '..'`;
+  if (segments.some((segment) => segment.toLowerCase() === ".git")) {
+    return `'${path}' must not write into .git`;
+  }
+  if (touchesStateDir(segments)) {
+    return `'${path}' must not write into .steamtrain/ (only .steamtrain/outputs/): that is where the run history and step cache live`;
+  }
+  for (const match of path.matchAll(PLACEHOLDER)) {
+    const expr = match[1] as string;
+    if (expr === "workflow" || expr === "run.timestamp") continue;
+    if (expr.startsWith("inputs.") && Object.hasOwn(spec.inputs ?? {}, expr.slice(7))) continue;
+    return `uses '{{${expr}}}' (a path may use {{workflow}}, {{run.timestamp}} and declared {{inputs.<key>}})`;
+  }
+  return undefined;
+}
+
 export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number): ValidationResult {
   const parsed = workflowSpecSchema.safeParse(spec);
   if (!parsed.success) {
@@ -2068,7 +2153,7 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
 
   if (spec.inputs) {
     for (const [name, input] of Object.entries(spec.inputs)) {
-      if (!/^[a-zA-Z_][a-zA-Z0-9_-]*$/.test(name)) {
+      if (!IDENTIFIER_RE.test(name)) {
         return {
           ok: false,
           error: `input name '${name}' is not a valid identifier (use letters, digits, underscores, hyphens; must start with a letter or underscore)`,
@@ -2131,6 +2216,17 @@ export function validateWorkflow(spec: WorkflowSpec, loopMaxIterations?: number)
         };
       }
     }
+  }
+
+  for (const [name, output] of Object.entries(spec.outputs ?? {})) {
+    if (!IDENTIFIER_RE.test(name)) {
+      return {
+        ok: false,
+        error: `output name '${name}' is not a valid identifier (use letters, digits, underscores, hyphens; must start with a letter or underscore)`,
+      };
+    }
+    const pathIssue = output.path ? outputPathIssue(output.path, spec) : undefined;
+    if (pathIssue) return { ok: false, error: `output '${name}' path ${pathIssue}` };
   }
 
   const stepsById = new Map<string, WorkflowStep>();

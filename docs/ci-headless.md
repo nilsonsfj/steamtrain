@@ -21,6 +21,7 @@ steamtrain workflow run bug-hunt --input "audit the parser" \
 | Flag | Meaning |
 | --- | --- |
 | `--report json\|markdown\|junit` | Report format. |
+| `--out <output>=<path>` | Where a run saves one of the workflow's declared outputs, e.g. `--out report=$DEST` (once per output). Not the same as `workflow export --out`. |
 | `--output <file>` (`-o`) | Write the report to a file. Omit to print it to stdout. |
 
 Rules of thumb:

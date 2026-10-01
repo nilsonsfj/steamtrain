@@ -2,7 +2,7 @@ import type { AgentInstanceId, TokenUsage } from "../types/events";
 import type { ApprovalRejectDisposition } from "./approval";
 import type { StepEditPatch } from "./control";
 import { addTokensInto, emptyTokens, formatTokens, totalTokens } from "./cost";
-import type { WorkflowEvent } from "./events";
+import type { WorkflowEvent, WorkflowOutputResult } from "./events";
 import type {
   AgentWorktreeInfo,
   GateStep,
@@ -175,6 +175,8 @@ export interface RunRecord {
   harvest?: RunHarvestInfo;
   /** Mid-run steering actions (pause/resume/step edits), in order. */
   interventions?: RunIntervention[];
+  /** The workflow's declared outputs: the file each was written to, or why not. */
+  outputs?: WorkflowOutputResult[];
 }
 
 /** Post-run worktree harvesting status, recorded by `workflow history apply/prune`. */
@@ -332,6 +334,7 @@ export class RunRecordBuilder {
   private ok = true;
   private budget?: RunBudgetInfo;
   private interventions: RunIntervention[] = [];
+  private outputs?: WorkflowOutputResult[];
   /** Set by {@link continueFrom}: the next `workflow_start` keeps the tree. */
   private continuing = false;
 
@@ -385,6 +388,7 @@ export class RunRecordBuilder {
         this.ok = true;
         this.budget = undefined;
         this.interventions = [];
+        this.outputs = undefined;
         break;
       case "phase_start": {
         const phase: HistoryPhase = {
@@ -555,6 +559,7 @@ export class RunRecordBuilder {
         break;
       case "workflow_done":
         this.ok = event.ok;
+        this.outputs = event.outputs;
         break;
       case "run_paused":
         this.interventions.push({ kind: "paused", by: event.by, ts: event.ts });
@@ -591,6 +596,8 @@ export class RunRecordBuilder {
     error?: string;
     endedAt?: number;
     timedOut?: boolean;
+    /** Outputs the host wrote itself, when the run's own were deferred to a hand-off that failed. */
+    outputs?: WorkflowOutputResult[];
   }): RunRecord {
     const endedAt = opts.endedAt ?? Date.now();
     const phases = this.finalizePhases();
@@ -613,6 +620,7 @@ export class RunRecordBuilder {
       timedOut: opts.status === "canceled" && opts.timedOut ? true : undefined,
       budget: this.budget,
       interventions: this.interventions.length > 0 ? this.interventions : undefined,
+      outputs: opts.outputs ?? this.outputs,
     };
   }
 

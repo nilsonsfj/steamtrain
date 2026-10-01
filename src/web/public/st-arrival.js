@@ -259,6 +259,10 @@
   /** Plain-text receipt + per-step ledger, downloaded as a .txt file. */
   function exportArrivalReport(report, headline) {
     var lines = [headline, "", SteamtrainReducer.formatArrivalReceipt(report.receipt), ""];
+    if (report.outputs && report.outputs.length && SteamtrainReducer.arrivalOutputLines) {
+      lines.push.apply(lines, SteamtrainReducer.arrivalOutputLines(report.outputs, S.project && S.project.cwd));
+      lines.push("");
+    }
     collectArrivalLeafSteps().forEach(function (s) {
       var r = s.result || {};
       var bits = [s.stepId, s.status];
@@ -827,6 +831,8 @@
     // Whatever the banner and the ledger have not already said: retries, gates
     // that did not pass, condition-skips — and, on a clean run, the receipt.
     body.appendChild(renderNotes(report, root));
+    var saved = renderSavedOutputs(report);
+    if (saved) body.appendChild(saved);
 
     var shown = outputStep(leaves, root, report);
     body.appendChild(renderOutput(shown));
@@ -919,6 +925,32 @@
         h("div", { class: "sev", text: (c.id || "").toUpperCase() }),
         h("div", { class: "what", text: c.value })
       ));
+    });
+    return box;
+  }
+
+  /**
+   * Where the workflow's declared outputs were saved, or why one was not: the
+   * answer to "where did the report go?" A workflow that declares none gets
+   * nothing here.
+   */
+  function renderSavedOutputs(report) {
+    var outputs = report.outputs || [];
+    if (!outputs.length || !SteamtrainReducer.arrivalOutputLines) return null;
+    var lines = SteamtrainReducer.arrivalOutputLines(outputs, S.project && S.project.cwd);
+    var box = h("div", { class: "arrival-report arrival-outputs" });
+    box.appendChild(h("div", { class: "arrival-report-head" },
+      h("div", { class: "src", text: "Saved" }),
+      h("div", { class: "rule" })
+    ));
+    outputs.forEach(function (o, i) {
+      var row = h("div", { class: "finding" },
+        h("div", { class: "sev" + (o.written ? "" : " medium"), text: o.written ? "FILE" : "not saved" }),
+        h("div", { class: "what", text: lines[i] })
+      );
+      var tip = [o.written ? o.path : "", o.description].filter(Boolean).join(" — ");
+      if (tip) row.setAttribute("title", tip);
+      box.appendChild(row);
     });
     return box;
   }

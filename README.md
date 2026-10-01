@@ -173,6 +173,11 @@ completed steps again. Re-run any past run fresh (`run --from <id>`), or replay
 only what failed (`--retry-failed`). To retry failed steps on a different
 agent/model, use `--retarget-agent` (TUI: `t`; Web: **Retry with agent…**).
 
+A workflow can also declare **outputs** next to its inputs: named results the
+engine writes to files when the run ends, such as bug-hunt's report under
+`.steamtrain/outputs/bug-hunt/<started>/report.md`. Send one elsewhere with
+`--out report=bugs.md`. See [Workflow outputs](docs/workflow-spec.md#workflow-outputs).
+
 ### Stay in control of unattended runs
 
 Workflows can pause at **human approval checkpoints**. Attended, you approve in

@@ -11,11 +11,13 @@ import type {
   NarrationLine,
   StepEditPatch,
   StepResult,
+  WorkflowOutputResult,
   WorkflowRunControl,
   WorkflowSpec,
 } from "../workflow";
 import { appendNarration, matchApprovalKey, matchPendingInput } from "../workflow";
 import {
+  RUN_HANDOFF_ABORT,
   RunRecordBuilder,
   WORKFLOW_CACHE_DIR,
   WORKFLOW_HISTORY_DIR,
@@ -294,6 +296,8 @@ export function useWorkflowRunner({
         });
         let runError: string | undefined;
         let workflowOk = true;
+        // Offered by the engine when it skips the outputs for a hand-off.
+        let deferredOutputs: (() => Promise<WorkflowOutputResult[]>) | undefined;
         let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
         let publisher: LiveRunPublisher | undefined;
         let disposeCancelWatch: (() => void) | undefined;
@@ -433,8 +437,12 @@ export function useWorkflowRunner({
             withStoreApprovals(liveStore, runId, approvalProvider),
             control,
             withStoreHumanInputs(liveStore, runId, humanInputProvider),
-            undefined,
-            runId,
+            {
+              onOutputsDeferred: (write) => {
+                deferredOutputs = write;
+              },
+              runId,
+            },
           )) {
             // Mid-run detach: once ownership transfer is committed, stop
             // feeding events into the local view,
@@ -487,6 +495,9 @@ export function useWorkflowRunner({
             handoff && handoff.runId === runId && handoff.committed && wasAborted,
           );
           let handedOff = false;
+          // Set when the hand-off failed: the run then ends here, as an error,
+          // and the terminal save below records why and where its outputs went.
+          let detachFailure: { error: string; outputs?: WorkflowOutputResult[] } | undefined;
           if (handingOff && handoff) {
             handoffRef.current = null;
             let spawned: Awaited<ReturnType<typeof completeHandoff>>;
@@ -505,6 +516,8 @@ export function useWorkflowRunner({
                   input: handoff.launch.input,
                   params: handoff.launch.params,
                   spec: handoff.launch.spec,
+                  // No `outputPaths`: only a CLI `--out` run has them, and
+                  // the TUI hands off only the runs it started itself.
                   fresh: false,
                 },
               });
@@ -528,24 +541,30 @@ export function useWorkflowRunner({
               }
             } else {
               // Handoff failed: completeHandoff already settled the live
-              // meta as errored. Record history so the partial run isn't lost.
-              try {
-                await historyStoreRef.current.save(
-                  recorder.build({ status: "error", error: `detach failed: ${spawned.error}` }),
-                );
-              } catch {
-                // History is best-effort.
-              }
+              // meta as errored. The terminal path below records history so the
+              // partial run isn't lost. No runner will write the outputs the
+              // engine held back, so write them here.
+              detachFailure = {
+                error: `detach failed: ${spawned.error}`,
+                outputs: await deferredOutputs?.().catch(() => undefined),
+              };
               if (mountedRef.current) setWfNotice(`detach failed: ${spawned.error}`);
             }
           }
 
           if (!handedOff) {
-            const status = wasAborted ? "canceled" : runError || !workflowOk ? "error" : "done";
+            const status = detachFailure
+              ? "error"
+              : wasAborted
+                ? "canceled"
+                : runError || !workflowOk
+                  ? "error"
+                  : "done";
+            const endError = detachFailure?.error ?? runError;
             // Settle the live-run mirror (flush events, then terminal meta) so
             // cross-UI tailers see the complete stream. Best-effort.
             try {
-              await publisher?.finish(status, { ok: status === "done", error: runError });
+              await publisher?.finish(status, { ok: status === "done", error: endError });
             } catch (err) {
               // Mirroring is best-effort; surface a soft warning so the gap is visible.
               if (mountedRef.current) {
@@ -553,7 +572,9 @@ export function useWorkflowRunner({
               }
             }
             try {
-              await historyStoreRef.current.save(recorder.build({ status, error: runError }));
+              await historyStoreRef.current.save(
+                recorder.build({ status, error: endError, outputs: detachFailure?.outputs }),
+              );
             } catch (err) {
               // History is best-effort; a failed write must not break the run.
               if (mountedRef.current) {
@@ -915,7 +936,7 @@ export function useWorkflowRunner({
     // Stop the local engine immediately; its run loop performs the handoff and
     // re-attaches after abort cleanup. The commit latch above wins races with a
     // final workflow event or an abort-time exception.
-    ac.abort();
+    ac.abort(RUN_HANDOFF_ABORT);
     return null;
   }, [mountedRef]);
 

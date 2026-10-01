@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -517,6 +517,28 @@ describe("workflow history store", () => {
     await store.save(record);
     const loaded = await store.get("r-spec");
     expect(loaded?.specHash).toBe("abc123");
+  });
+
+  it("round-trips a run's outputs, dropping fields of the wrong type", async () => {
+    const root = tempDir();
+    const store = createWorkflowHistoryStore(root);
+    const builder = new RunRecordBuilder({ id: "r-out", workflow: "demo", input: "hi", cwd: root });
+    builder.handle({ kind: "workflow_start", name: "demo", phaseCount: 0, stepCount: 0, ts: 1 });
+    builder.handle({ kind: "workflow_done", ok: true, results: [], ts: 2 });
+    const outputs = [
+      { key: "report", written: true, path: join(root, "report.md"), bytes: 12 },
+      { key: "log", written: false, error: "step 'check' failed" },
+    ];
+    await store.save({ ...builder.build({ status: "done" }), outputs });
+    expect((await store.get("r-out"))?.outputs).toEqual(outputs);
+
+    // A hand-edited record: a path that is not a string must not reach the views.
+    const { writeFile } = await import("node:fs/promises");
+    const file = join(root, "r-out.json");
+    const raw = JSON.parse(readFileSync(file, "utf8"));
+    raw.outputs = [{ key: "report", written: true, path: 7, bytes: "12" }, { written: true }, null];
+    await writeFile(file, JSON.stringify(raw));
+    expect((await store.get("r-out"))?.outputs).toEqual([{ key: "report", written: true }]);
   });
 
   it("marks a v1 record's steps the cancel took down as interrupted", async () => {

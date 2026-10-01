@@ -27,6 +27,7 @@ import {
   runRunsCommand,
   runTakeoverCommand,
   runWorkflowCommand,
+  undeclaredOutputMessages,
 } from "./run-cli";
 import { loadSettings } from "./settings";
 import type { AgentInstanceId } from "./types/events";
@@ -45,6 +46,7 @@ import {
   type WorktreeSource,
   aggregateCosts,
   applyWorkflowStepOverrides,
+  arrivalOutputLines,
   autonomyBadge,
   autonomyDescription,
   createWorkflowCacheStore,
@@ -366,6 +368,22 @@ export async function runCli(args: string[], io: CliIO = {}): Promise<number> {
       // treated as text, never as a flag.
       const dryRun = splitDryRunArgs(rest);
       if (dryRun.isDryRun) {
+        if (dryRun.resumeFlags) {
+          // A dry run plans a workflow by name; it does not preview a resume.
+          err(
+            `--dry-run cannot be combined with ${dryRun.resumeFlags.join(", ")}: a dry run plans a workflow by name and does not preview a resume\n`,
+          );
+          return 1;
+        }
+        if (dryRun.outs) {
+          // Dropped from the plan, but a mistyped --out is a mistake the real run
+          // refuses, so the preview must not approve it.
+          const outIssue = dryRunOutIssue(orchestrator, dryRun.planArgs[0], dryRun.outs);
+          if (outIssue) {
+            err(`${outIssue}\n`);
+            return 1;
+          }
+        }
         return planCommand(orchestrator, dryRun.planArgs, io, out, err);
       }
       return runWorkflowCommand(orchestrator, config, rest, io, out, err);
@@ -485,7 +503,20 @@ interface PlanOptions {
  * Example: `run tour --input --dry-run` runs the workflow with the literal
  * input "--dry-run"; `run tour --input hi --dry-run` prints the plan.
  */
-export function splitDryRunArgs(args: string[]): { isDryRun: boolean; planArgs: string[] } {
+export function splitDryRunArgs(args: string[]): {
+  isDryRun: boolean;
+  planArgs: string[];
+  /**
+   * Flags that only apply to resuming a recorded run (`--from`, `--retry-failed`
+   * and the `--step` / `--retarget-*` that narrow one). A dry run plans a workflow
+   * by name and does not preview a resume, and dropping them would approve a
+   * command line the real run refuses (`--retry-failed`, `--step`, `--retarget-*`
+   * without `--from`) or one that is not what it looks like (`--from`).
+   */
+  resumeFlags?: string[];
+  /** The `--out` values given, dropped from the plan but checked against the workflow. */
+  outs?: string[];
+} {
   const valueTaking = new Set([
     "--input",
     "-i",
@@ -497,27 +528,44 @@ export function splitDryRunArgs(args: string[]): { isDryRun: boolean; planArgs: 
     "--report",
     "--output",
     "-o",
+    "--out",
+    "--human",
+    "--step",
+    "--retarget-agent",
+    "--retarget-model",
   ]);
   // --agent passes THROUGH to the plan so the dry-run preview reflects the
   // re-route it would apply (otherwise the plan would lie, showing the blocked
-  // agent). --on-approval / --report / --output are run-only and dropped.
-  const dropWithValue = new Set(["--on-approval", "--report", "--output", "-o"]);
-  const dropBare = new Set([
-    "--dry-run",
-    "--fresh",
-    "--detach",
-    "-d",
-    "--approve-all",
+  // agent). The rest are run-only, which the plan has no flag for: they are
+  // dropped with their values rather than sent to fail its parser.
+  const dropWithValue = new Set([
+    "--on-approval",
+    "--report",
+    "--output",
+    "-o",
+    "--out",
+    "--human",
+  ]);
+  const resumeOnly = new Set([
+    "--from",
+    "--step",
+    "--retarget-agent",
+    "--retarget-model",
     "--retry-failed",
   ]);
+  const dropBare = new Set(["--dry-run", "--fresh", "--detach", "-d", "--approve-all"]);
   let isDryRun = false;
+  const resumeFlags: string[] = [];
+  const outs: string[] = [];
   const planArgs: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === undefined) continue;
     if (valueTaking.has(arg)) {
       const value = args[i + 1];
-      if (!dropWithValue.has(arg)) {
+      if (resumeOnly.has(arg)) resumeFlags.push(arg);
+      else if (arg === "--out") outs.push(value ?? "");
+      else if (!dropWithValue.has(arg)) {
         planArgs.push(arg);
         if (value !== undefined) planArgs.push(value);
       }
@@ -528,10 +576,41 @@ export function splitDryRunArgs(args: string[]): { isDryRun: boolean; planArgs: 
       isDryRun = true;
       continue;
     }
+    if (arg === "--retry-failed") {
+      resumeFlags.push(arg);
+      continue;
+    }
     if (dropBare.has(arg)) continue;
     planArgs.push(arg);
   }
-  return { isDryRun, planArgs };
+  return {
+    isDryRun,
+    planArgs,
+    ...(resumeFlags.length > 0 ? { resumeFlags } : {}),
+    ...(outs.length > 0 ? { outs } : {}),
+  };
+}
+
+/** What is wrong with the `--out` values of a dry run, judged as the real run judges them. */
+function dryRunOutIssue(
+  orchestrator: Orchestrator,
+  name: string | undefined,
+  outs: string[],
+): string | undefined {
+  const paths: Record<string, string> = {};
+  for (const value of outs) {
+    const eq = value.indexOf("=");
+    const key = value.slice(0, eq);
+    if (eq < 1 || eq === value.length - 1 || key.startsWith("-") || key === "__proto__") {
+      return `--out expects <output>=<path>, got '${value}'`;
+    }
+    if (Object.hasOwn(paths, key)) return `--out given more than once for '${key}'`;
+    paths[key] = value.slice(eq + 1);
+  }
+  const spec = name && !name.startsWith("--") ? orchestrator.listWorkflows()[name] : undefined;
+  // An unknown workflow is the plan's own error to report.
+  const undeclared = spec && name ? undeclaredOutputMessages(name, spec, paths) : [];
+  return undeclared.length > 0 ? undeclared.join("\n") : undefined;
 }
 
 function parsePlanOptions(args: string[]): PlanOptions | null {
@@ -549,7 +628,8 @@ function parsePlanOptions(args: string[]): PlanOptions | null {
       const eq = value.indexOf("=");
       if (eq < 1) return null;
       const key = value.slice(0, eq);
-      if (key.startsWith("-")) return null;
+      // `__proto__` would be swallowed by the object's own setter, not stored.
+      if (key.startsWith("-") || key === "__proto__") return null;
       options.params[key] = value.slice(eq + 1);
       i += 1;
     } else if (arg === "--stdin") {
@@ -1366,6 +1446,9 @@ function printHistoryRecord(
     }
     if (bits.length > 0) out(`  harvest:  ${bits.join(" · ")}\n`);
   }
+  for (const line of arrivalOutputLines(record.outputs ?? [], record.cwd)) {
+    out(`  output:   ${line}\n`);
+  }
   out(`  totals:   ${formatRunTotals(record.totals, { cached: true, tokens: true })}\n`);
   printModelBreakdown(modelBreakdownForRecord(record), out);
   for (const phase of record.phases) {
@@ -2072,7 +2155,8 @@ function parseCacheClearOptions(args: string[]): CacheClearOptions | null {
       const eq = value.indexOf("=");
       if (eq < 1) return null;
       const key = value.slice(0, eq);
-      if (key.startsWith("-")) return null;
+      // `__proto__` would be swallowed by the object's own setter, not stored.
+      if (key.startsWith("-") || key === "__proto__") return null;
       options.params[key] = value.slice(eq + 1);
       i += 1;
     } else if (arg === "--stdin") {
@@ -2113,9 +2197,9 @@ Usage:
   steamtrain workflow validate [name]
   steamtrain workflow plan <name> --input <text> [--param key=value ...] [--agent <id>] [--json]
   steamtrain workflow plan <name> --stdin [--param key=value ...] [--agent <id>] [--json]
-  steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--agent <id>] [--approve-all | --on-approval fail|stop] [--human <stepId>=<value|@file> ...] [--report json|markdown|junit [--output <file>]]
-  steamtrain workflow run <name> --stdin [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--agent <id>] [--approve-all | --on-approval fail|stop] [--human <stepId>=<value|@file> ...] [--report json|markdown|junit [--output <file>]]
-  steamtrain workflow run --from <runId> [--retry-failed] [--retarget-agent <id> [--retarget-model <id>]] [--step <id> ...] [--param key=value ...] [--input <text>] [--json] [--detach]
+  steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--agent <id>] [--approve-all | --on-approval fail|stop] [--human <stepId>=<value|@file> ...] [--out <output>=<path> ...] [--report json|markdown|junit [--output <file>]]
+  steamtrain workflow run <name> --stdin [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--agent <id>] [--approve-all | --on-approval fail|stop] [--human <stepId>=<value|@file> ...] [--out <output>=<path> ...] [--report json|markdown|junit [--output <file>]]
+  steamtrain workflow run --from <runId> [--retry-failed] [--retarget-agent <id> [--retarget-model <id>]] [--step <id> ...] [--param key=value ...] [--input <text>] [--out <output>=<path> ...] [--json] [--detach]
   steamtrain workflow attach [<runId>] [--json]
   steamtrain workflow runs [--all] [--json]
   steamtrain workflow cancel <runId>

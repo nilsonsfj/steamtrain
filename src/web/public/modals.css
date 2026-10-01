@@ -499,6 +499,12 @@ select.sel.invalid {
   white-space: pre-wrap;
   word-break: break-word;
 }
+.hist-outputs .saved {
+  color: var(--done-text);
+}
+.hist-outputs .not-saved {
+  color: var(--gate);
+}
 .hist-model-table {
   margin: 4px 0 14px;
   width: 100%;

@@ -1,15 +1,17 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AgentAdapter, AgentRunOptions } from "../src/agents";
+import type { RunWorkflowOptions } from "../src/orchestrator/orchestrator";
 import type { AgentEvent, AgentId } from "../src/types/events";
 import { type WorkflowHost, WorkflowRunManager } from "../src/web/runs";
 import { createWebServer } from "../src/web/server";
 import {
   type ApprovalProvider,
+  type HumanInputProvider,
   type LiveRunStore,
   type StepResult,
   type WorkflowCacheStore,
@@ -18,6 +20,7 @@ import {
   type WorkflowSpec,
   createLiveRunStore,
   createWorkflowCacheStore,
+  createWorkflowHistoryStore,
   runWorkflow,
   workflowCacheKey,
 } from "../src/workflow";
@@ -69,7 +72,7 @@ const chainSpec: WorkflowSpec = {
   ],
 };
 
-function makeEngineHost(): {
+function makeEngineHost(outputs?: WorkflowSpec["outputs"]): {
   host: WorkflowHost;
   state: { prompts: string[]; releaseA: () => void; abortSeen: boolean };
 } {
@@ -106,9 +109,10 @@ function makeEngineHost(): {
       })();
     },
   });
+  const spec: WorkflowSpec = outputs ? { ...chainSpec, outputs } : chainSpec;
   const host: WorkflowHost = {
     listWorkflows() {
-      return { [chainSpec.name]: chainSpec };
+      return { [spec.name]: spec };
     },
     canDispatchWorkflowSpec() {
       return { ok: true };
@@ -123,10 +127,12 @@ function makeEngineHost(): {
       _inputs?: Record<string, string | number | boolean>,
       _approval?: ApprovalProvider,
       control?: WorkflowRunControl,
+      _humanInput?: HumanInputProvider,
+      options?: RunWorkflowOptions,
     ): AsyncIterable<WorkflowEvent> {
       return runWorkflow(
-        chainSpec,
-        { input, cache },
+        spec,
+        { input, cache, onOutputsDeferred: options?.onOutputsDeferred },
         { createAdapter, maxConcurrency: 2, cwd: cwd ?? "/", control },
         signal,
       );
@@ -541,6 +547,46 @@ describe("web run manager mid-run detach", () => {
     const meta = await liveRuns.get(runId);
     expect(meta?.status).toBe("error");
     expect(String(meta?.error)).toMatch(/detach failed/);
+  });
+});
+
+describe("web run manager: outputs when a hand-off fails", () => {
+  it("writes the outputs the engine held back, and records them", async () => {
+    const { host, state } = makeEngineHost({
+      report: { value: "a ok: {{steps.a.ok}}", path: "out/report.md" },
+    });
+    const historyStore = createWorkflowHistoryStore(join(root, "history"));
+    const manager = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: root,
+      config: { stepTimeoutSec: 60, workflowTimeoutSec: 3600 },
+      liveRuns,
+      historyStore,
+      detachIo: { projectDir: root },
+    });
+    const runId = manager.start("detach-demo", "hi").runId as string;
+    for (let i = 0; i < 100 && state.prompts.length === 0; i++) await delay(10);
+    // No entry script, so the spawn fails and the run ends here instead.
+    process.argv[1] = "";
+    expect(manager.detach(runId)).toEqual({ ok: true });
+    state.releaseA();
+    for (let i = 0; i < 200 && manager.get(runId)?.status !== "error"; i++) await delay(10);
+
+    let record = await historyStore.get(runId);
+    for (let i = 0; i < 200 && !record; i++) {
+      await delay(10);
+      record = await historyStore.get(runId);
+    }
+    expect(record?.status).toBe("error");
+    expect(record?.outputs).toEqual([
+      expect.objectContaining({
+        key: "report",
+        written: true,
+        path: join(root, "out", "report.md"),
+      }),
+    ]);
+    expect(readFileSync(join(root, "out", "report.md"), "utf8")).toBe("a ok: false\n");
   });
 });
 

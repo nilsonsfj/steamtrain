@@ -105,6 +105,14 @@ function SelectionFollowHarness({ onRunner }: { onRunner: (runner: Runner) => vo
   );
 }
 
+/**
+ * Wait for a state change made outside `act()` to reach the frame. One tick is
+ * enough on a quiet machine; a loaded runner can take several turns to render.
+ */
+async function frameShows(view: { lastFrame: () => string | undefined }, text: string) {
+  for (let turn = 0; turn < 100 && !view.lastFrame()?.includes(text); turn++) await tick();
+}
+
 describe("workflow selection auto-follow", () => {
   it("hands selection to arrow-key navigation and re-engages after reset", async () => {
     let runner: Runner | undefined;
@@ -121,7 +129,7 @@ describe("workflow selection auto-follow", () => {
       type: "event",
       event: { kind: "step_start", phaseId: "phase", stepId: "step-1", iteration: 1, ts: 2 },
     });
-    await tick();
+    await frameShows(view, "1:follow");
     expect(view.lastFrame()).toContain("1:follow");
 
     await type(view.stdin, UP);
@@ -167,7 +175,7 @@ describe("workflow selection auto-follow", () => {
       type: "event",
       event: { kind: "step_start", phaseId: "phase", stepId: "step-2", iteration: 1, ts: 6 },
     });
-    await tick();
+    await frameShows(view, "2:follow");
     expect(view.lastFrame()).toContain("2:follow");
 
     view.unmount();

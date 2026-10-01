@@ -28,12 +28,14 @@ import {
   WORKFLOW_RUNS_DIR,
   type WorkflowEvent,
   type WorkflowHistoryStore,
+  type WorkflowOutputResult,
   type WorkflowSpec,
   acquireRunSlot,
   addSpend,
   aggregateLeavesByModel,
   applyRetryStepFilter,
   applyWorkflowStepOverrides,
+  arrivalOutputLines,
   classifyRun,
   createLiveRunPublisher,
   createLiveRunStore,
@@ -129,6 +131,8 @@ export interface RunOptions {
   report?: ReportFormat;
   /** `--output <file>`: write the `--report` to a file instead of stdout. */
   output?: string;
+  /** `--out <key>=<path>` (repeatable): where this run writes a declared workflow output. */
+  outputPaths: Record<string, string>;
 }
 
 export function parseRunOptions(args: string[]): RunOptions | null {
@@ -142,6 +146,7 @@ export function parseRunOptions(args: string[]): RunOptions | null {
     human: {},
     detach: false,
     steps: [],
+    outputPaths: {},
   };
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -156,7 +161,8 @@ export function parseRunOptions(args: string[]): RunOptions | null {
       const eq = value.indexOf("=");
       if (eq < 1) return null;
       const key = value.slice(0, eq);
-      if (key.startsWith("-")) return null;
+      // `__proto__` would be swallowed by the object's own setter, not stored.
+      if (key.startsWith("-") || key === "__proto__") return null;
       options.params[key] = value.slice(eq + 1);
       i += 1;
     } else if (arg === "--from") {
@@ -200,7 +206,8 @@ export function parseRunOptions(args: string[]): RunOptions | null {
       const eq = value.indexOf("=");
       if (eq < 1) return null;
       const key = value.slice(0, eq);
-      if (key.startsWith("-")) return null;
+      // `__proto__` would be swallowed by the object's own setter, not stored.
+      if (key.startsWith("-") || key === "__proto__") return null;
       options.human[key] = value.slice(eq + 1);
       i += 1;
     } else if (arg === "--approve-all") {
@@ -220,6 +227,18 @@ export function parseRunOptions(args: string[]): RunOptions | null {
       if (!value) return null;
       options.output = value;
       i += 1;
+    } else if (arg === "--out") {
+      const value = args[i + 1];
+      if (!value) return null;
+      const eq = value.indexOf("=");
+      if (eq < 1 || eq === value.length - 1) return null;
+      const key = value.slice(0, eq);
+      // `__proto__` would be swallowed by the object's own setter, not stored.
+      if (key.startsWith("-") || key === "__proto__" || Object.hasOwn(options.outputPaths, key)) {
+        return null;
+      }
+      options.outputPaths[key] = value.slice(eq + 1);
+      i += 1;
     } else {
       return null;
     }
@@ -229,6 +248,21 @@ export function parseRunOptions(args: string[]): RunOptions | null {
   // `--output` only has meaning alongside `--report`.
   if (options.output && !options.report) return null;
   return options;
+}
+
+/** One message per `--out` key the workflow does not declare as an output. */
+export function undeclaredOutputMessages(
+  name: string,
+  spec: WorkflowSpec,
+  outputPaths: Readonly<Record<string, string>>,
+): string[] {
+  const declared = Object.keys(spec.outputs ?? {});
+  return Object.keys(outputPaths)
+    .filter((key) => !declared.includes(key))
+    .map(
+      (key) =>
+        `--out: '${name}' declares no output '${key}' (outputs: ${declared.join(", ") || "none"})`,
+    );
 }
 
 export async function runWorkflowCommand(
@@ -244,8 +278,8 @@ export async function runWorkflowCommand(
   const options = parseRunOptions(positional ? args.slice(1) : args);
   if (!options) {
     err(
-      `usage: steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--agent <id>] [--approve-all | --on-approval fail|stop] [--human <stepId>=<value|@file> ...] [--report json|markdown|junit [--output <file>]]
-       steamtrain workflow run --from <runId> [--retry-failed] [--retarget-agent <id> [--retarget-model <id>]] [--step <id> ...] [--json] [--detach]
+      `usage: steamtrain workflow run <name> --input <text> [--param key=value ...] [--json] [--fresh] [--dry-run] [--detach] [--agent <id>] [--approve-all | --on-approval fail|stop] [--human <stepId>=<value|@file> ...] [--out <output>=<path> ...] [--report json|markdown|junit [--output <file>]]
+       steamtrain workflow run --from <runId> [--retry-failed] [--retarget-agent <id> [--retarget-model <id>]] [--step <id> ...] [--out <output>=<path> ...] [--json] [--detach]
 `,
     );
     return 1;
@@ -362,6 +396,12 @@ export async function runWorkflowCommand(
     for (const e of resolved.errors) err(`input error: ${e}\n`);
     return 1;
   }
+  const undeclared = undeclaredOutputMessages(name, spec, options.outputPaths);
+  if (undeclared.length > 0) {
+    for (const message of undeclared) err(`${message}\n`);
+    return 1;
+  }
+  const outputPaths = Object.keys(options.outputPaths).length > 0 ? options.outputPaths : undefined;
 
   const templateWarnings = lintTemplateRefs(spec);
   for (const w of templateWarnings) out(`warn: ${w}\n`);
@@ -497,6 +537,7 @@ export async function runWorkflowCommand(
       onApproval: options.onApproval,
       humanInputs: Object.keys(humanValues).length > 0 ? humanValues : undefined,
       rerouteAgent: options.agent,
+      outputPaths,
       json: options.json,
       cwd,
       io,
@@ -544,6 +585,7 @@ export async function runWorkflowCommand(
     spec,
     input: trimmedInput,
     params,
+    outputPaths,
     cwd,
     runId: randomUUID(),
     fresh: forceFresh,
@@ -622,6 +664,8 @@ interface SpawnDetachedRunOptions {
   humanInputs?: Record<string, string>;
   /** `--agent <id>`: the detached child re-plans the re-route from this target. */
   rerouteAgent?: string;
+  /** `--out`: the detached child writes the workflow's outputs here. */
+  outputPaths?: Record<string, string>;
   json: boolean;
   cwd: string;
   io: CliIO;
@@ -680,6 +724,7 @@ async function spawnDetachedRun(options: SpawnDetachedRunOptions): Promise<numbe
         onApproval: options.onApproval,
         humanInputs: options.humanInputs,
         rerouteAgent: options.rerouteAgent,
+        outputPaths: options.outputPaths,
       },
     }),
   );
@@ -858,6 +903,7 @@ export async function runDetachedRunner(
     spec,
     input: launch.input,
     params: launch.params,
+    outputPaths: launch.outputPaths,
     cwd,
     runId,
     fresh: Boolean(launch.fresh),
@@ -970,6 +1016,8 @@ interface DriveWorkflowRunOptions {
   spec: WorkflowSpec;
   input: string;
   params?: Record<string, string | number | boolean>;
+  /** `--out`: where the run writes the workflow's declared outputs. */
+  outputPaths?: Record<string, string>;
   cwd: string;
   runId: string;
   fresh: boolean;
@@ -1132,8 +1180,8 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<Drive
       options.approval,
       control,
       options.humanInput,
-      undefined,
-      runId,
+      // A handed-off run keeps the start its first owner gave it.
+      { outputPaths: options.outputPaths, startedAt: options.priorOwner?.startedAt, runId },
     )) {
       const event = asOwnWork(replayed);
       recorder.handle(event);
@@ -1145,7 +1193,10 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<Drive
       if (event.kind === "workflow_done") {
         ok = event.ok;
         budgetExceeded = Boolean(event.budgetExceeded);
-        if (!options.json) printRunSummary(event.results, out, stepMetaFromSpec(spec));
+        if (!options.json) {
+          printRunSummary(event.results, out, stepMetaFromSpec(spec));
+          printRunOutputs(event.outputs, cwd, out, err);
+        }
       }
     }
     // The engine yields a final workflow_done on abort rather than throwing, so
@@ -1322,7 +1373,10 @@ export async function runAttachCommand(
   const timedOut = final.status === "canceled" && Boolean(final.timedOut);
   if (done && !json) {
     printHumanEvent(done, out, { canceled: final.status === "canceled" && !timedOut, timedOut });
-    if (done.kind === "workflow_done") printRunSummary(done.results, out, stepMeta);
+    if (done.kind === "workflow_done") {
+      printRunSummary(done.results, out, stepMeta);
+      printRunOutputs(done.outputs, meta.cwd, out, err);
+    }
   }
   if (json) {
     out(
@@ -2057,6 +2111,33 @@ export function printHumanEvent(
       );
       return;
   }
+}
+
+/**
+ * Where the run's declared outputs went: the answer to "where is the report?"
+ * printed last, so it is the line left on screen when the run ends. An output
+ * that was not saved is a warning on stderr instead, as a `--report` that
+ * cannot be written is: a script that discards stdout, or only watches stderr
+ * for trouble, still learns that the deliverable is missing. The exit code is
+ * the run's own, as it is for `--report`.
+ */
+export function printRunOutputs(
+  outputs: readonly WorkflowOutputResult[] | undefined,
+  cwd: string,
+  out: (text: string) => void,
+  err: (text: string) => void,
+): void {
+  if (!outputs?.length) return;
+  const lines = arrivalOutputLines(outputs, cwd);
+  if (outputs.some((output) => output.written)) {
+    out("\noutputs\n");
+    outputs.forEach((output, i) => {
+      if (output.written) out(`  ${lines[i]}\n`);
+    });
+  }
+  outputs.forEach((output, i) => {
+    if (!output.written) err(`warning: ${lines[i]}\n`);
+  });
 }
 
 /**

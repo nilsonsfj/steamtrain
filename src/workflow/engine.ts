@@ -44,7 +44,7 @@ import { collectArtifacts } from "./artifacts";
 import { MAX_COMMAND_OUTPUT_BYTES, runShellCommand } from "./command";
 import type { StepEditPatch, StepKillResult, WorkflowRunControl } from "./control";
 import { addSpend, addTokens, replayedSpend } from "./cost";
-import type { StepPermissionsInfo, WorkflowEvent } from "./events";
+import type { StepPermissionsInfo, WorkflowEvent, WorkflowOutputResult } from "./events";
 import type { StepRetryEvent } from "./events";
 import { mergeConflictGuidance } from "./gc";
 import { resolveSteamtrainCliInvocation } from "./github-checks";
@@ -94,6 +94,7 @@ import {
   shouldAdvanceFailover,
   shouldFailFastWithoutCandidate,
 } from "./model-failover";
+import { writeWorkflowOutputs } from "./outputs";
 import { applyWorkflowStepOverrides } from "./overrides";
 import {
   type WorkspaceFingerprint,
@@ -260,7 +261,32 @@ export interface WorkflowRunContext {
    * never set this.
    */
   workflowCallStack?: string[];
+  /**
+   * Where this run writes its declared `outputs`, by output key, overriding
+   * the spec's `path` (`--out key=path`). Relative paths resolve against
+   * `deps.cwd`.
+   */
+  outputPaths?: Record<string, string>;
+  /**
+   * When the run started, if not just now: a run handed to a background
+   * process carries the start its first owner gave it, so its outputs land
+   * where its history record says.
+   */
+  startedAt?: number;
+  /**
+   * Offered when the run skipped its outputs because it was being handed to a
+   * background runner: call it to write them here instead, if that hand-off
+   * then fails and no runner will.
+   */
+  onOutputsDeferred?: (write: () => Promise<WorkflowOutputResult[]>) => void;
 }
+
+/**
+ * The reason a run's signal is aborted with when it is being handed to a
+ * detached runner rather than stopped. The runner finishes the run and writes
+ * its outputs; every other abort (a cancel, a timeout) writes what finished.
+ */
+export const RUN_HANDOFF_ABORT = "handoff";
 
 /**
  * Shared mutable state one run's schedulers and step executions operate on.
@@ -388,9 +414,11 @@ export async function* runWorkflow(
   const runnableSpec = bound.spec;
 
   const runAbort = new AbortController();
-  const onExternalAbort = (): void => runAbort.abort();
+  // Carry the caller's abort reason across: run outputs tell a hand-off
+  // (`RUN_HANDOFF_ABORT`) from a cancel by it.
+  const onExternalAbort = (): void => runAbort.abort(signal?.reason);
   if (signal) {
-    if (signal.aborted) runAbort.abort();
+    if (signal.aborted) runAbort.abort(signal.reason);
     else signal.addEventListener("abort", onExternalAbort, { once: true });
   }
 
@@ -411,6 +439,7 @@ async function* runWorkflowBody(
   bindingResolutions: StepBindingResolution[],
 ): AsyncGenerator<WorkflowEvent> {
   const signal = abortRun.signal;
+  const startedAt = ctx.startedAt ?? Date.now();
   const cache = ctx.cache ?? new Map<string, StepResult>();
   const outputs = new Map<string, string>();
   const results = new Map<string, StepResult>();
@@ -434,7 +463,8 @@ async function* runWorkflowBody(
     name: runnableSpec.name,
     phaseCount: runnableSpec.phases.length,
     stepCount: totalSteps,
-    ts: Date.now(),
+    // The run's start, as the output directory and {{run.timestamp}} read it.
+    ts: startedAt,
   };
 
   const env: RunEnv = {
@@ -502,12 +532,57 @@ async function* runWorkflowBody(
       ok: workflowOk && !signal?.aborted && !env.budgetState.exceeded,
       results: [...finalResults.values()],
       budgetExceeded: env.budgetState.exceeded,
+      outputs: await runOutputs(env, startedAt),
       ts: Date.now(),
     };
   } finally {
     abortRun.abort();
     await Promise.allSettled(env.drain);
   }
+}
+
+/**
+ * Write the workflow's declared outputs as the run ends. A sub-workflow's run
+ * writes none: its caller reads its steps. A run handed to a detached runner
+ * writes none either: the runner finishes the run and writes them then. A
+ * canceled or timed-out run writes the outputs whose steps did finish.
+ */
+async function runOutputs(
+  env: RunEnv,
+  startedAt: number,
+): Promise<WorkflowOutputResult[] | undefined> {
+  const { spec, ctx, deps, signal } = env;
+  if (!spec.outputs || Object.keys(spec.outputs).length === 0) return undefined;
+  if (ctx.workflowCallStack?.length) return undefined;
+  const handedOff = "the run was handed to a background runner";
+  // One default directory for every write of this run, the deferred one included.
+  const claimed: { runDir?: Promise<string> } = {};
+  const write = (stopWith?: () => string | undefined) =>
+    writeWorkflowOutputs(spec, {
+      claimed,
+      cwd: deps.cwd,
+      startedAt,
+      context: { input: ctx.input, inputs: ctx.inputs, outputs: env.outputs, results: env.results },
+      results: env.results,
+      paths: ctx.outputPaths,
+      stopWith,
+    });
+  const isHandingOff = () => Boolean(signal?.aborted && signal.reason === RUN_HANDOFF_ABORT);
+  if (isHandingOff()) {
+    ctx.onOutputsDeferred?.(() => write());
+    return write(() => handedOff);
+  }
+  // The hand-off can also land while the outputs are being written; the ones
+  // not yet written are then left to the runner, and offered back if it fails.
+  const results = await write(() => (isHandingOff() ? handedOff : undefined));
+  if (results.some((result) => result.error === handedOff)) {
+    ctx.onOutputsDeferred?.(() => write());
+  } else if (isHandingOff()) {
+    // It landed after the last write: everything is already on disk, so if the
+    // hand-off fails there is only the record of it to hand back.
+    ctx.onOutputsDeferred?.(async () => results);
+  }
+  return results;
 }
 
 /** Sum leaf-step cost across cached results, so a resumed run counts prior spend. */

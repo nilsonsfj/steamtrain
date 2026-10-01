@@ -72,7 +72,8 @@ export interface RenderPromptOptions {
   redact?: boolean;
 }
 
-const PLACEHOLDER = /\{\{\s*([^{}]+?)\s*\}\}/g;
+/** The `{{ … }}` placeholder grammar. Global: use with `replace` or `matchAll`, not `exec`. */
+export const PLACEHOLDER = /\{\{\s*([^{}]+?)\s*\}\}/g;
 const INPUT_REF = /^inputs\.(.+)$/;
 // NOTE: STEP_FIELD's greedy `(.+)` id group means it also matches worktree/
 // artifact/json refs whose trailing part happens to end in a plain field name
@@ -828,6 +829,53 @@ function extractRefs(text: string | undefined): string[] {
   return refs;
 }
 
+/**
+ * The step a `steps.…` reference reads, and whether it reads only how the step
+ * ended (`ok`, `error`, `exitCode`) rather than what it made. Judged by which
+ * pattern matched, in the order that matters: `steps.x.json.ok` is a field of
+ * the step's JSON, not its `ok`. `kind` says which pattern that was, and
+ * `field` what it named, so a caller never re-classifies in a different order.
+ */
+function referencedStep(
+  ref: string,
+):
+  | { id: string; status: boolean; kind: "worktree" | "artifact" | "json" | "field"; field: string }
+  | undefined {
+  const specific = [
+    [STEP_WORKTREE_FIELD, "worktree"],
+    [STEP_ARTIFACT_FIELD, "artifact"],
+    [STEP_JSON_FIELD, "json"],
+  ] as const;
+  for (const [pattern, kind] of specific) {
+    const match = pattern.exec(ref);
+    if (match) return { id: match[1] as string, status: false, kind, field: match[2] ?? "" };
+  }
+  const match = STEP_FIELD.exec(ref);
+  if (!match) return undefined;
+  return {
+    id: match[1] as string,
+    status: ["ok", "error", "exitCode"].includes(match[2] as string),
+    kind: "field",
+    field: match[2] as string,
+  };
+}
+
+/**
+ * The steps a template reads, in order of first use, each with whether it
+ * reads only how the step ended (`ok`, `error`, `exitCode`) or also what it
+ * made (its output, items, json, …).
+ */
+export function templateStepReads(text: string): Map<string, "status" | "content"> {
+  const reads = new Map<string, "status" | "content">();
+  for (const ref of extractRefs(text)) {
+    const step = referencedStep(ref);
+    if (!step) continue;
+    if (!step.status) reads.set(step.id, "content");
+    else if (!reads.has(step.id)) reads.set(step.id, "status");
+  }
+  return reads;
+}
+
 /** Scan condition text fields for template refs. `condition.step` is intentionally skipped — it's a plain step id, not a template string. */
 function scanConditionRefs(condition: GateCondition | undefined, refs: string[]): void {
   if (!condition) return;
@@ -997,58 +1045,32 @@ export function lintTemplateRefs(spec: WorkflowSpec): string[] {
         // {{steps.<id>.<field>}} — json/worktree/artifact MUST be matched
         // before STEP_FIELD; its greedy id group also eats `json.output`.
         if (!ref.startsWith("steps.")) continue;
-        const jsonMatch = STEP_JSON_FIELD.exec(ref);
-        if (jsonMatch) {
-          const refId = jsonMatch[1] as string;
+        // Classified in the order the renderer resolves it, so `steps.a.json.ok`
+        // is a field of a's JSON and not an unknown step "a.json".
+        const read = referencedStep(ref);
+        if (read) {
+          const refId = read.id;
           if (!stepIds.has(refId)) {
             warnings.push(`step '${step.id}' references unknown step '${refId}'`);
-          }
-          continue;
-        }
-
-        const worktreeMatch = STEP_WORKTREE_FIELD.exec(ref);
-        if (worktreeMatch) {
-          const refId = worktreeMatch[1] as string;
-          if (!stepIds.has(refId)) {
-            warnings.push(`step '${step.id}' references unknown step '${refId}'`);
-          } else {
-            const refStep = findStep(spec, refId);
-            if (refStep && !hasWorkspace(refStep)) {
-              warnings.push(
-                `step '${step.id}' references '${refId}.worktree.${worktreeMatch[2]}' but '${refId}' does not have workspace isolation (only worker, processor, and command steps — or a merge step with mode "worktree" — have worktrees)`,
-              );
-            }
-          }
-          continue;
-        }
-
-        const artifactMatch = STEP_ARTIFACT_FIELD.exec(ref);
-        if (artifactMatch) {
-          const refId = artifactMatch[1] as string;
-          if (!stepIds.has(refId)) {
-            warnings.push(`step '${step.id}' references unknown step '${refId}'`);
-          } else {
-            const refStep = findStep(spec, refId);
-            if (refStep && !hasArtifacts(refStep)) {
-              warnings.push(
-                `step '${step.id}' references '${refId}.artifacts.${artifactMatch[2]}' but '${refId}' has no declared artifacts`,
-              );
-            }
-          }
-          continue;
-        }
-
-        const stepFieldMatch = STEP_FIELD.exec(ref);
-        if (stepFieldMatch) {
-          const refId = stepFieldMatch[1] as string;
-          const field = stepFieldMatch[2] as string;
-          if (!stepIds.has(refId)) {
-            warnings.push(`step '${step.id}' references unknown step '${refId}'`);
-          } else if (field === "exitCode") {
+          } else if (read.kind === "field" && read.field === "exitCode") {
             const refStep = findStep(spec, refId);
             if (refStep && !isCommandStep(refStep)) {
               warnings.push(
                 `step '${step.id}' references '${refId}.exitCode' but '${refId}' is not a command step (exitCode is only available on command steps)`,
+              );
+            }
+          } else if (read.kind === "worktree") {
+            const refStep = findStep(spec, refId);
+            if (refStep && !hasWorkspace(refStep)) {
+              warnings.push(
+                `step '${step.id}' references '${refId}.worktree.${read.field}' but '${refId}' does not have workspace isolation (only worker, processor, and command steps — or a merge step with mode "worktree" — have worktrees)`,
+              );
+            }
+          } else if (read.kind === "artifact") {
+            const refStep = findStep(spec, refId);
+            if (refStep && !hasArtifacts(refStep)) {
+              warnings.push(
+                `step '${step.id}' references '${refId}.artifacts.${read.field}' but '${refId}' has no declared artifacts`,
               );
             }
           }
@@ -1064,6 +1086,70 @@ export function lintTemplateRefs(spec: WorkflowSpec): string[] {
             warnings.push(`step '${step.id}' references unknown step '${refId}'`);
           } else {
             warnings.push(`step '${step.id}' uses invalid template reference '{{${ref}}}'`);
+          }
+        }
+      }
+    }
+  }
+
+  // Two outputs with the same path overwrite each other. Identical strings,
+  // placeholders and all, render to one file in a run; two different templates
+  // that happen to collide cannot be known before it.
+  const literalPaths = new Map<string, string>();
+  for (const [name, output] of Object.entries(spec.outputs ?? {})) {
+    if (!output.path) continue;
+    const normal = output.path
+      .split(/[\\/]/)
+      .filter((segment) => segment !== "" && segment !== ".")
+      .join("/");
+    const first = literalPaths.get(normal);
+    if (first === undefined) literalPaths.set(normal, name);
+    else {
+      warnings.push(
+        `outputs '${first}' and '${name}' both write to '${output.path}': the later one overwrites the earlier`,
+      );
+    }
+  }
+
+  // Outputs render once, after every step, so they have no item or loop pass.
+  for (const [name, output] of Object.entries(spec.outputs ?? {})) {
+    for (const ref of extractRefs(output.value)) {
+      if (ref.startsWith("inputs.")) {
+        if (!inputKeys.has(ref.slice(7))) {
+          warnings.push(`output '${name}' references undeclared input '${ref.slice(7)}'`);
+        }
+      } else if (ref === "item" || ref.startsWith("item.") || ref === "iteration") {
+        warnings.push(`output '${name}' uses '{{${ref}}}', which has no value once the run ends`);
+      } else if (ref.startsWith("steps.")) {
+        const read = referencedStep(ref);
+        if (read === undefined) {
+          warnings.push(`output '${name}' uses invalid template reference '{{${ref}}}'`);
+        } else if (!stepIds.has(read.id)) {
+          warnings.push(`output '${name}' references unknown step '${read.id}'`);
+        } else {
+          // The kind and field checks prompts get too: a value that would render
+          // empty. The pattern that named the step decides the field, so
+          // `steps.a.json.exitCode` is JSON, not an `exitCode`.
+          const { id } = read;
+          const refStep = findStep(spec, id);
+          if (read.kind === "field" && read.field === "exitCode") {
+            if (refStep && !isCommandStep(refStep)) {
+              warnings.push(
+                `output '${name}' references '${id}.exitCode' but '${id}' is not a command step (exitCode is only available on command steps)`,
+              );
+            }
+          } else if (read.kind === "worktree") {
+            if (refStep && !hasWorkspace(refStep)) {
+              warnings.push(
+                `output '${name}' references '${id}.worktree.${read.field}' but '${id}' does not have workspace isolation`,
+              );
+            }
+          } else if (read.kind === "artifact") {
+            if (refStep && !hasArtifacts(refStep)) {
+              warnings.push(
+                `output '${name}' references '${id}.artifacts.${read.field}' but '${id}' has no declared artifacts`,
+              );
+            }
           }
         }
       }

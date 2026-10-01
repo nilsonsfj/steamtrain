@@ -65,6 +65,14 @@ const bugHunt: WorkflowSpec = {
   // with no write access at all. This is the workflow people most want to point
   // at a real repository, and now they can read the guarantee off the spec.
   permissions: READ_ONLY,
+  // The engine writes the report itself, so the read-only steps still leave
+  // something behind: .steamtrain/outputs/bug-hunt/<started>/report.md.
+  outputs: {
+    report: {
+      description: "The prioritized report of verified findings.",
+      value: "{{steps.report.output}}",
+    },
+  },
   phases: [
     {
       id: "scan",
@@ -283,6 +291,12 @@ const codeReview: WorkflowSpec = {
       description: "Agent model that cross-checks flagged issues for false positives.",
       default: FREE.mimoZen,
       fallbackModels: [FREE.nemotronLightning, FREE.lingFlash],
+    },
+  },
+  outputs: {
+    report: {
+      description: "The prioritized review of confirmed issues.",
+      value: "{{steps.report.output}}",
     },
   },
   phases: [
