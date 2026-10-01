@@ -111,14 +111,40 @@ export async function withFileLock<T>(
   if (typeof heartbeat.unref === "function") heartbeat.unref();
 
   try {
-    return { value: await fn(true), locked: true };
+    const value = await withCleanup(
+      () => fn(true),
+      () => releaseIfOwned(lockPath, payload.token!),
+    );
+    return { value, locked: true };
   } finally {
-    try {
-      await releaseIfOwned(lockPath, payload.token!);
-    } finally {
-      clearInterval(heartbeat);
-    }
+    clearInterval(heartbeat);
   }
+}
+
+/**
+ * Run `fn`, then `cleanup`. A cleanup failure is thrown (fail loud) but keeps
+ * `fn`'s own error as its `cause` instead of silently replacing it.
+ */
+async function withCleanup<T>(fn: () => Promise<T>, cleanup: () => Promise<void>): Promise<T> {
+  let value: T | undefined;
+  let failed = false;
+  let error: unknown;
+  try {
+    value = await fn();
+  } catch (err) {
+    failed = true;
+    error = err;
+  }
+  try {
+    await cleanup();
+  } catch (cleanupErr) {
+    if (failed && cleanupErr instanceof Error && cleanupErr.cause === undefined) {
+      cleanupErr.cause = error;
+    }
+    throw cleanupErr;
+  }
+  if (failed) throw error;
+  return value as T;
 }
 
 interface LockSnapshot {
@@ -181,11 +207,7 @@ async function withStealLock<T>(
   for (let attempt = 0; attempt < attempts; attempt++) {
     const payload = newPayload();
     if (await tryAcquireStealLock(stealPath, payload)) {
-      try {
-        return await fn();
-      } finally {
-        await removeIfOwned(stealPath, payload.token!);
-      }
+      return withCleanup(fn, () => removeIfOwned(stealPath, payload.token!));
     }
     await abortableSleep(5);
   }

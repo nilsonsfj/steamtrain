@@ -232,10 +232,8 @@ export function createLiveRunPublisher(store: LiveRunStore, runId: string): Live
     stop() {
       finished = true;
       clearInterval(heartbeatTimer);
-      if (flushTimer) {
-        clearTimeout(flushTimer);
-        flushTimer = undefined;
-      }
+      // Hand buffered events to the write chain instead of dropping them.
+      flush();
     },
     async finish(status, opts = {}) {
       finished = true;

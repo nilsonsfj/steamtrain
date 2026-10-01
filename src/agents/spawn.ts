@@ -302,6 +302,9 @@ export async function* runProcessLines(opts: ProcessRunOptions): AsyncGenerator<
     if (idleTimer) clearTimeout(idleTimer);
     opts.signal?.removeEventListener("abort", onAbort);
     if (!settled && !killed) startKill();
+    // Natural-exit contract (same as command steps): a grandchild still holding
+    // the output pipes keeps this generator open and is killed with the group;
+    // one that redirected its own stdio is a deliberate daemon and outlives it.
     // Adapters return as soon as they see the (possibly synthetic) exit, which
     // closes this generator. Await the process group here so workspace.dispose
     // cannot run while a SIGTERM-immune agent is still alive.

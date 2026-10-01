@@ -181,6 +181,19 @@ describe("file lock recovery invariants", () => {
     await expect(stat(steal)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it("keeps the callback's error as the cause when releasing the lock also fails", async () => {
+    const lock = await scratchLock();
+    const original = new Error("callback failed");
+    const failure = await withFileLock(lock, async () => {
+      // Someone else removes the lock mid-flight, so the release finds no owner.
+      await rm(lock, { force: true });
+      throw original;
+    }).catch((err: unknown) => err);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toMatch(/lock ownership lost/);
+    expect((failure as Error).cause).toBe(original);
+  });
+
   it.each(["", "{", '{"pid":0,"host":"bad"}'])(
     "fails closed on an unverifiable coordinator %j",
     async (payload) => {
