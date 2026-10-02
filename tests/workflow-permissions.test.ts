@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -13,8 +13,10 @@ import {
   type WorkflowSpec,
   createGitWorktreeManager,
   createWorkflowRunControl,
+  findOutboundSymlinks,
   fingerprintChanges,
   fingerprintWorkspace,
+  linkedTargets,
   runWorkflow,
 } from "../src/workflow";
 
@@ -613,6 +615,67 @@ describe("fingerprintWorkspace", () => {
     const root = await tempDir();
     expect(await fingerprintWorkspace(root)).toBeUndefined();
     expect(await fingerprintChanges(undefined, undefined)).toEqual([]);
+  });
+});
+
+describe("the engine's links and copies in a read-only workspace", () => {
+  afterEach(async () => {
+    await Promise.all(tempRoots.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  });
+
+  /** A repo with a linked `node_modules` and a copied, self-ignoring `sub/.gitignore`. */
+  async function linkedRepo(): Promise<{ repo: string; linked: string[] }> {
+    const root = await tempDir();
+    const repo = join(root, "repo");
+    await initRepo(repo, { ".gitignore": "node_modules/\n", "sub/keep.txt": "keep\n" });
+    await mkdir(join(root, "deps"), { recursive: true });
+    await symlink(join(root, "deps"), join(repo, "node_modules"));
+    // What `linkIgnoredRuntimeEntries` leaves for a nested ignore file that ignores itself.
+    await writeFile(join(repo, "sub", ".gitignore"), ".gitignore\nhidden/\n");
+    return { repo, linked: ["node_modules", "sub/.gitignore"] };
+  }
+
+  it("records links by target and copied ignore files by content", async () => {
+    const { repo, linked } = await linkedRepo();
+    const entries = await linkedTargets(repo, { linkedIgnoredPaths: linked });
+    expect(entries.get("node_modules")).toMatchObject({ kind: "link" });
+    expect(entries.get("sub/.gitignore")).toMatchObject({ kind: "file" });
+  });
+
+  it("accepts the links and copies as the step found them", async () => {
+    const { repo, linked } = await linkedRepo();
+    const accepted = await linkedTargets(repo, { linkedIgnoredPaths: linked });
+    expect(await findOutboundSymlinks(repo, { accepted })).toEqual([]);
+  });
+
+  it("reports an edited copied ignore file as M, a removed one as D, a replaced one as T", async () => {
+    const { repo, linked } = await linkedRepo();
+    const accepted = await linkedTargets(repo, { linkedIgnoredPaths: linked });
+    const file = join(repo, "sub", ".gitignore");
+
+    // The self-ignoring file is how an agent would hide new untracked files.
+    await writeFile(file, ".gitignore\nhidden/\nsecret.txt\n");
+    expect(await findOutboundSymlinks(repo, { accepted })).toEqual(["M sub/.gitignore"]);
+
+    await unlink(file);
+    expect(await findOutboundSymlinks(repo, { accepted })).toEqual(["D sub/.gitignore"]);
+
+    await symlink(join(repo, "sub", "keep.txt"), file);
+    expect(await findOutboundSymlinks(repo, { accepted })).toEqual(["T sub/.gitignore"]);
+  });
+
+  it("checks a copy from a step cwd in the subdirectory it lives in, and skips the root link above", async () => {
+    const { repo, linked } = await linkedRepo();
+    const cwd = join(repo, "sub");
+    const accepted = await linkedTargets(cwd, { linkedIgnoredPaths: linked });
+    expect(await findOutboundSymlinks(cwd, { accepted })).toEqual([]);
+
+    // The linked root `node_modules` sits above this cwd: not this step's to keep.
+    await unlink(join(repo, "node_modules"));
+    expect(await findOutboundSymlinks(cwd, { accepted })).toEqual([]);
+
+    await writeFile(join(cwd, ".gitignore"), "changed\n");
+    expect(await findOutboundSymlinks(cwd, { accepted })).toEqual(["M .gitignore"]);
   });
 });
 

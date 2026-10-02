@@ -97,6 +97,7 @@ import {
 import { writeWorkflowOutputs } from "./outputs";
 import { applyWorkflowStepOverrides } from "./overrides";
 import {
+  type LinkedEntry,
   type WorkspaceFingerprint,
   describeViolations,
   findOutboundSymlinks,
@@ -2782,7 +2783,7 @@ async function executeAgentStep(
   const declaredPermissions = stepPermissions(step, ctx);
   const verifyWorkspace = declaredPermissions?.verify === true;
   let baseline: WorkspaceFingerprint | undefined;
-  let acceptedLinks: Map<string, string> | undefined;
+  let acceptedLinks: Map<string, LinkedEntry> | undefined;
   if (verifyWorkspace) {
     acceptedLinks = await linkedTargets(workspace.cwd, {
       linkedIgnoredPaths: workspace.linkedIgnoredPaths,
@@ -3034,7 +3035,7 @@ async function verifyReadOnlyWorkspace(
     cwd: string;
     linkedIgnoredPaths?: string[];
     /** The engine's own links as the step found them (`linkedTargets`). */
-    acceptedLinks?: ReadonlyMap<string, string>;
+    acceptedLinks?: ReadonlyMap<string, LinkedEntry>;
     baseline?: WorkspaceFingerprint;
     signal?: AbortSignal;
   },

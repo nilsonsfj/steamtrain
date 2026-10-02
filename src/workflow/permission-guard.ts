@@ -1,5 +1,5 @@
-import { randomBytes } from "node:crypto";
-import { lstat, readlink, rm } from "node:fs/promises";
+import { createHash, randomBytes } from "node:crypto";
+import { lstat, readFile, readlink, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { STEAMTRAIN_STATE_DIR, isOutside } from "./fs-util";
@@ -163,26 +163,37 @@ export function describeViolations(paths: readonly string[], limit = 8): string 
 }
 
 /**
- * The engine's own links in a fresh worktree, by repo-relative path, with the
- * target each one had when the step started. `linkedIgnoredPaths` (the lease's)
+ * What the engine put at a linked path of a fresh worktree, as the step found it:
+ * a symlink and its target, or an ignore-rule file copied instead of linked
+ * (see `linkIgnoredRuntimeEntries`) and the hash of its content.
+ */
+export type LinkedEntry = { kind: "link"; target: string } | { kind: "file"; hash: string };
+
+/**
+ * The engine's own links in a fresh worktree, by repo-relative path, with what
+ * each one was when the step started. `linkedIgnoredPaths` (the lease's)
  * are ignored dependencies and build output linked back to the source checkout
  * so an agent can use them. They lead out of the workspace by design, and the
  * fingerprint already leaves them out, so {@link findOutboundSymlinks} accepts
- * them, but only while they still point where they did here.
+ * them, but only while they still point where they did here. The ignore-rule
+ * files among them are copies, not links, and ignored, so the fingerprint never
+ * sees them either: they are recorded by content hash instead.
  */
 export async function linkedTargets(
   cwd: string,
   options: { linkedIgnoredPaths?: readonly string[]; signal?: AbortSignal } = {},
-): Promise<Map<string, string>> {
+): Promise<Map<string, LinkedEntry>> {
   const { linkedIgnoredPaths, signal } = options;
-  const targets = new Map<string, string>();
+  const targets = new Map<string, LinkedEntry>();
   if (!linkedIgnoredPaths?.length) return targets;
   try {
     const top = (await runGitText(["rev-parse", "--show-toplevel"], cwd, signal)).trim();
     for (const rel of linkedIgnoredPaths) {
       try {
         const abs = join(top, rel);
-        if ((await lstat(abs)).isSymbolicLink()) targets.set(rel, await readlink(abs));
+        const st = await lstat(abs);
+        if (st.isSymbolicLink()) targets.set(rel, { kind: "link", target: await readlink(abs) });
+        else if (st.isFile()) targets.set(rel, { kind: "file", hash: await hashFile(abs) });
       } catch {
         // Gone already: nothing to accept, and nothing left to write through.
       }
@@ -193,6 +204,14 @@ export async function linkedTargets(
   return targets;
 }
 
+/** Content hash of a file; one that cannot be read hashes to a fixed marker, so it fails closed. */
+async function hashFile(path: string): Promise<string> {
+  return readFile(path).then(
+    (bytes) => createHash("sha256").update(bytes).digest("hex"),
+    () => "unreadable",
+  );
+}
+
 /**
  * Paths of symlinks under `cwd` whose targets resolve outside the workspace.
  * Used before read-only steps so an agent cannot exfiltrate or mutate bytes
@@ -200,11 +219,13 @@ export async function linkedTargets(
  * and after them, so it cannot leave one behind. The links in `accepted` (from
  * {@link linkedTargets}) are the engine's own. Each must still be there, still a
  * link, with its recorded target: gone is reported as `D`, replaced by a file or
- * directory as `T`, re-pointed as `L`, as the fingerprint leaves them out.
+ * directory as `T`, re-pointed as `L`, as the fingerprint leaves them out. A
+ * copied ignore-rule file must still be a file with its recorded content: gone
+ * is `D`, replaced by a link or directory `T`, edited `M`.
  */
 export async function findOutboundSymlinks(
   cwd: string,
-  options: { accepted?: ReadonlyMap<string, string>; signal?: AbortSignal } = {},
+  options: { accepted?: ReadonlyMap<string, LinkedEntry>; signal?: AbortSignal } = {},
 ): Promise<string[]> {
   const { accepted, signal } = options;
   try {
@@ -248,11 +269,19 @@ export async function findOutboundSymlinks(
       const rel = key.slice((prefix ?? "").length);
       const abs = join(cwd, rel);
       const st = await lstat(abs).catch(() => undefined);
+      if (expected.kind === "file") {
+        if (!st) violations.push(`D ${rel}`);
+        else if (!st.isFile()) violations.push(`T ${rel}`);
+        else if ((await hashFile(abs)) !== expected.hash) {
+          violations.push(`M ${rel}`);
+        }
+        continue;
+      }
       // A link gone between `lstat` and `readlink` is as gone as one never found.
       const target = st?.isSymbolicLink() ? await readlink(abs).catch(() => undefined) : undefined;
       if (!st || (st.isSymbolicLink() && target === undefined)) violations.push(`D ${rel}`);
       else if (!st.isSymbolicLink()) violations.push(`T ${rel}`);
-      else if (target !== expected) violations.push(`L ${rel} -> ${target}`);
+      else if (target !== expected.target) violations.push(`L ${rel} -> ${target}`);
     }
     return violations;
   } catch {
