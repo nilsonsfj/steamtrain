@@ -61,6 +61,31 @@ describe("withLandLock", () => {
     );
   });
 
+  it("forwards the release limits, and says so when the release is stuck", async () => {
+    const lockDir = await scratchDir();
+    const lockPath = lockFileFor(lockDir, "test-repo-key");
+    const warnings: string[] = [];
+    const failure = await withLandLock(
+      "/repo",
+      async () => {
+        // A live process holds the coordinator and never lets go.
+        await writeFile(
+          `${lockPath}.steal`,
+          JSON.stringify({ pid: process.pid, host: hostname(), createdAtMs: 0 }),
+        );
+      },
+      {
+        lockDir,
+        resolveKey: fixedKey,
+        releaseWarnAfterMs: 20,
+        releaseMaxWaitMs: 120,
+        onReleaseWarn: (message) => warnings.push(message),
+      },
+    ).catch((err: unknown) => err);
+    expect((failure as Error).message).toMatch(/could not release/);
+    expect(warnings).toHaveLength(1);
+  });
+
   it("releases the lock so a subsequent acquisition succeeds and leaves no file", async () => {
     const lockDir = await scratchDir();
     const opts = { lockDir, resolveKey: fixedKey } as const;

@@ -60,7 +60,8 @@ v0.1.0-alpha.2.
 
 - Releasing the project state lock warns after 10 seconds, and gives up after
   5 minutes, when its coordinator is held by a process that never lets go
-  (`releaseWarnAfterMs`, `releaseMaxWaitMs`).
+  (`releaseWarnAfterMs`, `releaseMaxWaitMs`). The CLI and `--web-ui` print that
+  warning, and a wait to acquire the lock that lasts over 3 seconds, on stderr.
 
 ### Fixed
 

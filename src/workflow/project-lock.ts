@@ -16,6 +16,23 @@ import { STEAMTRAIN_STATE_DIR } from "./fs-util";
  * Default lock path: `<project>/.steamtrain/locks/state.lock`.
  */
 
+/**
+ * Where lock waits go when a caller passes no `onWait`. The cache, history,
+ * live-run and worktree writers never do, so without a sink a stuck lock looks
+ * like a hang. The CLI and web entry points set it to stderr; the TUI leaves it
+ * unset, since a write there would corrupt the screen. A slow release is
+ * reported at once; a wait to acquire only once it has lasted
+ * {@link DEFAULT_NOTICE_DELAY_MS}, because parallel steps in one process brush
+ * against each other for a few milliseconds all the time.
+ */
+let lockNoticeSink: ((message: string) => void) | undefined;
+
+export function setProjectLockNoticeSink(sink: ((message: string) => void) | undefined): void {
+  lockNoticeSink = sink;
+}
+
+const DEFAULT_NOTICE_DELAY_MS = 3000;
+
 export interface ProjectLockOptions extends Omit<FileLockOptions, "bestEffort" | "label"> {
   /**
    * Directory that holds the lock file. When set (tests), the lock is
@@ -27,6 +44,8 @@ export interface ProjectLockOptions extends Omit<FileLockOptions, "bestEffort" |
    * style). Default false — state writers must not proceed unlocked.
    */
   bestEffort?: boolean;
+  /** How long a wait to acquire lasts before the notice sink hears of it. Default 3s. */
+  noticeDelayMs?: number;
 }
 
 /**
@@ -95,16 +114,44 @@ async function runLocked<T>(
   fn: () => Promise<T>,
   opts: ProjectLockOptions,
 ): Promise<T> {
-  const outcome = await withFileLock(lockPath, async () => fn(), {
-    maxWaitMs: opts.maxWaitMs,
-    staleMs: opts.staleMs,
-    pollMs: opts.pollMs,
-    signal: opts.signal,
-    nowMs: opts.nowMs,
-    sleep: opts.sleep,
-    onWait: opts.onWait,
-    bestEffort: opts.bestEffort ?? false,
-    label: "project state lock",
-  });
-  return outcome.value;
+  const sink = lockNoticeSink;
+  const delayMs = opts.noticeDelayMs ?? DEFAULT_NOTICE_DELAY_MS;
+  let waitNotice: NodeJS.Timeout | undefined;
+  const heldBySink = !opts.onWait && sink !== undefined;
+  const onWait =
+    opts.onWait ??
+    (sink
+      ? (message: string): void => {
+          waitNotice ??= setTimeout(
+            () => sink(`${message} (still not acquired after ${delayMs / 1000}s)`),
+            delayMs,
+          );
+        }
+      : undefined);
+  try {
+    const outcome = await withFileLock(
+      lockPath,
+      async () => {
+        clearTimeout(waitNotice);
+        return fn();
+      },
+      {
+        maxWaitMs: opts.maxWaitMs,
+        staleMs: opts.staleMs,
+        pollMs: opts.pollMs,
+        signal: opts.signal,
+        nowMs: opts.nowMs,
+        sleep: opts.sleep,
+        onWait,
+        onReleaseWarn: opts.onReleaseWarn ?? (heldBySink ? sink : undefined),
+        releaseMaxWaitMs: opts.releaseMaxWaitMs,
+        releaseWarnAfterMs: opts.releaseWarnAfterMs,
+        bestEffort: opts.bestEffort ?? false,
+        label: "project state lock",
+      },
+    );
+    return outcome.value;
+  } finally {
+    clearTimeout(waitNotice);
+  }
 }

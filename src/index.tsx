@@ -8,7 +8,7 @@ import { loadSettings } from "./settings";
 import { App } from "./tui/App";
 import { STEAMTRAIN_VERSION } from "./version";
 import { resolveWebAuthToken, resolveWebReadToken, startWebUi } from "./web";
-import { loadWorkflowCatalog } from "./workflow";
+import { loadWorkflowCatalog, setProjectLockNoticeSink } from "./workflow";
 import { loadWorkspaceConfig, workspaceScopeLabel } from "./workspace";
 
 /**
@@ -70,6 +70,12 @@ async function main(): Promise<void> {
     return;
   }
   const cwd = projectResolved.cwd;
+
+  // Lock waits (and a stuck lock release) are reported on stderr, except in the
+  // TUI, where a stray write would corrupt the screen.
+  if (args.length > 0 || webUi) {
+    setProjectLockNoticeSink((text) => process.stderr.write(`steamtrain: ${text}\n`));
+  }
 
   if (args.length > 0) {
     process.exitCode = await runCli(args, { cwd, workspacePath, configPath });

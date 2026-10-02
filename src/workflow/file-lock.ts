@@ -42,8 +42,10 @@ export interface FileLockOptions {
    * leave the lock behind lightly, so this is far longer than any healthy hold.
    */
   releaseMaxWaitMs?: number;
-  /** Warn (through `onWait`) once a release has waited this long. Default 10s. */
+  /** Warn (through `onReleaseWarn`, else `onWait`) once a release has waited this long. Default 10s. */
   releaseWarnAfterMs?: number;
+  /** Where the slow-release warning goes, when it should not share `onWait`'s channel. */
+  onReleaseWarn?: (message: string) => void;
 }
 
 export interface FileLockOutcome<T> {
@@ -129,7 +131,7 @@ export async function withFileLock<T>(
           warnAfterMs: opts.releaseWarnAfterMs ?? DEFAULT_RELEASE_WARN_AFTER_MS,
           now,
           onSlow: (waitedMs) =>
-            opts.onWait?.(
+            (opts.onReleaseWarn ?? opts.onWait)?.(
               `still waiting to release the ${label} (its coordinator has been held for ${Math.round(waitedMs / 1000)}s)`,
             ),
         }),

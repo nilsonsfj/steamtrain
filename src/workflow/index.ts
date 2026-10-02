@@ -461,6 +461,7 @@ export {
   type HistoryLockFn,
 } from "./history-store";
 export {
+  setProjectLockNoticeSink,
   withProjectStateLock,
   withStateDirLock,
   projectRootFromStatePath,

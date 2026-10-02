@@ -50,6 +50,12 @@ export interface LandLockOptions {
   lockDir?: string;
   /** Emitted once when the lock is contended, and again when it is acquired/skipped. */
   onWait?: (message: string) => void;
+  /** See {@link FileLockOptions.onReleaseWarn}. */
+  onReleaseWarn?: (message: string) => void;
+  /** See {@link FileLockOptions.releaseMaxWaitMs}. */
+  releaseMaxWaitMs?: number;
+  /** See {@link FileLockOptions.releaseWarnAfterMs}. */
+  releaseWarnAfterMs?: number;
 }
 
 /** Whether the acquisition succeeded — informational; `fn` always runs. */
@@ -116,6 +122,9 @@ export async function withLandLock<T>(
     nowMs: opts.nowMs,
     sleep: opts.sleep ?? abortableSleep,
     onWait: opts.onWait,
+    onReleaseWarn: opts.onReleaseWarn,
+    releaseMaxWaitMs: opts.releaseMaxWaitMs,
+    releaseWarnAfterMs: opts.releaseWarnAfterMs,
     bestEffort: true,
     label: "land lock",
   };

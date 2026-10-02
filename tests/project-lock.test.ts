@@ -1,4 +1,4 @@
-import { mkdtemp, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, stat, unlink, writeFile } from "node:fs/promises";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -11,6 +11,7 @@ import {
 import { withFileLock } from "../src/workflow/file-lock";
 import {
   projectRootFromStatePath,
+  setProjectLockNoticeSink,
   steamtrainDirFromStatePath,
   withProjectStateLock,
   withStateDirLock,
@@ -29,6 +30,65 @@ function sampleResult(stepId: string): StepResult {
 describe("project state lock", () => {
   afterEach(() => {
     setWorkflowCacheLock(undefined);
+    setProjectLockNoticeSink(undefined);
+  });
+
+  /** Releases the lock while a live process holds the coordinator for good. */
+  async function stuckRelease(project: string, onWait?: (message: string) => void) {
+    const lockDir = join(project, "locks");
+    return withProjectStateLock(
+      project,
+      async () => {
+        const [lock] = (await readdir(lockDir)).filter((name) => name.endsWith(".lock"));
+        await writeFile(
+          join(lockDir, `${lock}.steal`),
+          JSON.stringify({ pid: process.pid, host: hostname(), createdAtMs: 0 }),
+        );
+      },
+      { lockDir, onWait, releaseWarnAfterMs: 20, releaseMaxWaitMs: 120 },
+    ).catch((err: unknown) => err);
+  }
+
+  it("reports a slow release through the notice sink and forwards the release limits", async () => {
+    const notices: string[] = [];
+    setProjectLockNoticeSink((message) => notices.push(message));
+    const failure = await stuckRelease(await scratchDir());
+    expect((failure as Error).message).toMatch(/could not release/);
+    expect(
+      notices.filter((n) => /still waiting to release the project state lock/.test(n)),
+    ).toHaveLength(1);
+  });
+
+  it("tells the sink about a wait to acquire only once it has lasted the delay", async () => {
+    const project = await scratchDir();
+    const notices: string[] = [];
+    setProjectLockNoticeSink((message) => notices.push(message));
+    const lockDir = join(project, "locks");
+    const hold = (ms: number, noticeDelayMs: number) =>
+      withProjectStateLock(project, () => new Promise<void>((r) => setTimeout(r, ms)), {
+        lockDir,
+        pollMs: 5,
+        noticeDelayMs,
+      });
+
+    // A hold shorter than the delay: the second writer waits, and nothing is said.
+    await Promise.all([hold(30, 400), hold(0, 400)]);
+    expect(notices).toEqual([]);
+
+    // A hold that outlasts it: said once, with the delay named.
+    await Promise.all([hold(250, 40), hold(0, 40)]);
+    expect(notices).toEqual([
+      "waiting for the project state lock (still not acquired after 0.04s)",
+    ]);
+  });
+
+  it("prefers a caller's own onWait over the sink", async () => {
+    const sunk: string[] = [];
+    const own: string[] = [];
+    setProjectLockNoticeSink((message) => sunk.push(message));
+    await stuckRelease(await scratchDir(), (message) => own.push(message));
+    expect(own.length).toBeGreaterThan(0);
+    expect(sunk).toEqual([]);
   });
 
   it("serializes two concurrent critical sections", async () => {
