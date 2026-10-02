@@ -410,4 +410,103 @@ describe("kill chain (SIGTERM → SIGKILL fallback)", () => {
     expect(exitCode).toBe(0);
     expect(elapsed).toBeLessThan(2000);
   });
+
+  describe("when the agent exits and a helper keeps its pipes open", () => {
+    const pidFile = (name: string): string => join(tmpdir(), `st-spawn-${process.pid}-${name}.pid`);
+    const cleanup = (file: string): void => {
+      try {
+        process.kill(Number(readFileSync(file, "utf8")), "SIGKILL");
+      } catch {
+        // gone already
+      }
+      try {
+        unlinkSync(file);
+      } catch {
+        // never written
+      }
+    };
+
+    it("terminates the helper and reports the agent's own exit code", async () => {
+      if (process.platform === "win32") return;
+      const file = pidFile("holder");
+      try {
+        const start = Date.now();
+        const items = await drain(
+          runProcessLines({
+            binary: "sh",
+            args: ["-c", `sleep 30 & echo $! > "${file}"; echo '{}'; exit 3`],
+          }),
+        );
+        // Not the 10 minute idle timeout, nor the helper's 30 seconds.
+        expect(Date.now() - start).toBeLessThan(5000);
+        const exit = items.find((i) => i.kind === "exit");
+        expect(exit).toMatchObject({ kind: "exit", code: 3, timedOut: false });
+        expect(items.filter((i) => i.kind === "line")).toEqual([{ kind: "line", line: "{}" }]);
+        expect(isAlive(Number(readFileSync(file, "utf8")))).toBe(false);
+      } finally {
+        cleanup(file);
+      }
+    });
+
+    it("keeps the agent's last output when the event loop stalls past the linger", async () => {
+      if (process.platform === "win32") return;
+      const gen = runProcessLines({
+        binary: "sh",
+        args: [
+          "-c",
+          "i=0; while [ $i -lt 3000 ]; do echo '{\"n\":'$i'}'; i=$((i+1)); done; exit 0",
+        ],
+      });
+      const first = gen.next(); // spawns the child
+      // Block this loop well past the 250ms linger while the child finishes and
+      // exits with its output still in the pipe.
+      const until = Date.now() + 600;
+      while (Date.now() < until) {
+        // busy
+      }
+      const items: ProcessLine[] = [];
+      const head = await first;
+      if (!head.done) items.push(head.value);
+      items.push(...(await drain(gen)));
+      const lines = items.filter((i) => i.kind === "line");
+      expect(lines).toHaveLength(3000);
+      expect(items.find((i) => i.kind === "exit")).toMatchObject({ code: 0, signal: null });
+    });
+
+    it("kills a SIGTERM-immune helper with SIGKILL", async () => {
+      if (process.platform === "win32") return;
+      const file = pidFile("immune");
+      try {
+        const items = await drain(
+          runProcessLines({
+            binary: "sh",
+            args: ["-c", `(trap '' TERM; echo $$ > "${file}"; sleep 30) & sleep 0.2; echo '{}'`],
+          }),
+        );
+        expect(items.find((i) => i.kind === "exit")).toMatchObject({ code: 0 });
+        expect(isAlive(Number(readFileSync(file, "utf8")))).toBe(false);
+      } finally {
+        cleanup(file);
+      }
+    }, 15_000);
+
+    it("leaves a helper that redirected its own stdio running", async () => {
+      if (process.platform === "win32") return;
+      const file = pidFile("daemon");
+      try {
+        const start = Date.now();
+        const items = await drain(
+          runProcessLines({
+            binary: "sh",
+            args: ["-c", `sleep 30 >/dev/null 2>&1 & echo $! > "${file}"; echo '{}'`],
+          }),
+        );
+        expect(Date.now() - start).toBeLessThan(2000);
+        expect(items.find((i) => i.kind === "exit")).toMatchObject({ code: 0 });
+        expect(isAlive(Number(readFileSync(file, "utf8")))).toBe(true);
+      } finally {
+        cleanup(file);
+      }
+    });
+  });
 });

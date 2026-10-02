@@ -913,10 +913,10 @@ cannot tell it from a leaked one, so stop it yourself, for example in a later
 command step. A timeout or a cancel kills the whole process group, redirected
 or not, except a process that left the group with `setsid`.
 
-Agent steps leave a redirected daemon running in the same way, but they do not
-terminate a background process that still holds the output pipes when the agent
-exits: the step keeps waiting for the pipes to close until its idle or overall
-timeout.
+Agent steps follow the same rule: when the agent process exits, a background
+process still holding its output pipes is terminated, and one that redirected
+its own output is left running. On Windows only the process the step started is
+ended, not what it spawned.
 
 A typical trustworthy fix loop:
 

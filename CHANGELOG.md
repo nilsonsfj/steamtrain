@@ -39,11 +39,11 @@ v0.1.0-alpha.2.
   placeholders, since the value would be evaluated there. Pass the value
   through `env` and reference the variable, or set `allowShellTemplates: true`.
   See [`docs/workflow-spec.md`](docs/workflow-spec.md).
-- **A command step ends with its shell.** A background process that still holds
-  the step's output pipes (`cmd &`, a plain `nohup cmd &`) is now terminated
-  and reaped before the step reports, instead of the step waiting on the pipes
-  until its timeout. One that redirected its own output (`cmd >log 2>&1 &`) is
-  left running.
+- **A command or agent step ends with its process.** A background process that
+  still holds the step's output pipes (`cmd &`, a plain `nohup cmd &`) is now
+  terminated and reaped before the step reports, instead of the step waiting on
+  the pipes until its timeout. One that redirected its own output
+  (`cmd >log 2>&1 &`) is left running.
 - **File locks no longer expire by age.** A live owner is never revoked because
   its heartbeat is old; recovery needs a provably dead same-host owner. Restart
   every process that shares a lock directory together when upgrading. See

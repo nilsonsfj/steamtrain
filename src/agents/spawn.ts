@@ -57,6 +57,15 @@ export type ProcessLine =
 const SIGKILL_GRACE_MS = 2000;
 
 /**
+ * How long after the agent process exits its output pipes may stay open before
+ * whatever still holds them is terminated (see `runProcessLines`). A healthy
+ * exit closes them within a few milliseconds.
+ */
+const EXIT_LINGER_MS = 250;
+/** Output that keeps arriving after the agent exits extends the linger, up to this long in all. */
+const EXIT_LINGER_MAX_MS = 2000;
+
+/**
  * Spawns a child process and yields its stdout as complete NDJSON lines, plus
  * stderr chunks and a final `exit` summary.
  *
@@ -66,6 +75,10 @@ const SIGKILL_GRACE_MS = 2000;
  *  - stdout is reassembled into whole lines across chunk boundaries.
  *  - on Unix the child is detached into its own process group so kills reach
  *    helpers the CLI forks (mirrors `workflow/command.ts`).
+ *  - the run ends with the agent process. A grandchild that still holds the
+ *    output pipes shortly after it exits is terminated with the group (as in
+ *    `workflow/command.ts`) and the exit reports the agent's own code; one that
+ *    redirected its own stdio holds nothing and is left running.
  *  - a timeout, idle timeout, or aborted signal kills the process group
  *    (SIGTERM, then SIGKILL). Synthetic early-exit for adapters does NOT
  *    cancel the pending SIGKILL — a SIGTERM-immune agent must not keep
@@ -126,6 +139,12 @@ export async function* runProcessLines(opts: ProcessRunOptions): AsyncGenerator<
   let processExited = false;
   let cancelKill: (() => void) | undefined;
   let killed = false;
+  /** The agent exited but a helper kept its pipes open: killed, still its own exit. */
+  let lingering = false;
+  let exitInfo: { code: number | null; signal: NodeJS.Signals | null } | undefined;
+  let lingerTimer: NodeJS.Timeout | undefined;
+  /** When output (stdout or stderr) last arrived; a linger that saw some is not over. */
+  let lastDataAt = 0;
 
   child.stdout.setEncoding("utf8");
   child.stderr.setEncoding("utf8");
@@ -148,6 +167,7 @@ export async function* runProcessLines(opts: ProcessRunOptions): AsyncGenerator<
   }
 
   const noteActivity = (): void => {
+    lastDataAt = Date.now();
     resetIdleTimer();
   };
 
@@ -167,6 +187,7 @@ export async function* runProcessLines(opts: ProcessRunOptions): AsyncGenerator<
 
   const settle = (code: number | null, signal: NodeJS.Signals | null): void => {
     processExited = true;
+    if (lingerTimer) clearTimeout(lingerTimer);
     // The child handle closed; helpers in the same group may still be alive.
     // Drop SIGKILL only on a natural exit. A kill path waits for the group
     // in `finally` before cancelling the timer.
@@ -234,6 +255,35 @@ export async function* runProcessLines(opts: ProcessRunOptions): AsyncGenerator<
     }
   };
 
+  // The agent process is gone but 'close' has not followed, so something it
+  // started may still hold stdout/stderr. Without this the step would wait for
+  // the idle or overall timeout (or forever), so terminate the group instead.
+  // The agent's own last output may still be in the pipe, though, and a stalled
+  // event loop fires this timer before it is read: so the check runs after the
+  // poll phase has read what is pending, and output that arrived since the last
+  // look (within the cap) postpones it.
+  const armLinger = (exitedAt: number, checkedAt: number): void => {
+    lingerTimer = setTimeout(() => {
+      setImmediate(() => {
+        if (settled || killed) return;
+        const now = Date.now();
+        if (lastDataAt > checkedAt && now - exitedAt < EXIT_LINGER_MAX_MS) {
+          armLinger(exitedAt, now);
+          return;
+        }
+        lingering = true;
+        startKill();
+      });
+    }, EXIT_LINGER_MS);
+    lingerTimer.unref?.();
+  };
+  child.on("exit", (code, signal) => {
+    if (settled || killed) return;
+    exitInfo = { code, signal };
+    const now = Date.now();
+    armLinger(now, now);
+  });
+
   if (opts.timeoutMs && opts.timeoutMs > 0) {
     timer = setTimeout(() => {
       timedOut = true;
@@ -284,8 +334,8 @@ export async function* runProcessLines(opts: ProcessRunOptions): AsyncGenerator<
         if (remainder && remainder.length > 0) yield { kind: "line", line: remainder };
         yield {
           kind: "exit",
-          code: null,
-          signal: "SIGTERM",
+          code: lingering && exitInfo ? exitInfo.code : null,
+          signal: lingering && exitInfo ? exitInfo.signal : "SIGTERM",
           timedOut,
           idleTimedOut: idleTimedOut || undefined,
           stderr: stderrAll,
@@ -300,13 +350,13 @@ export async function* runProcessLines(opts: ProcessRunOptions): AsyncGenerator<
   } finally {
     if (timer) clearTimeout(timer);
     if (idleTimer) clearTimeout(idleTimer);
+    if (lingerTimer) clearTimeout(lingerTimer);
     opts.signal?.removeEventListener("abort", onAbort);
     if (!settled && !killed) startKill();
-    // Natural exit, unlike a command step: a grandchild still holding the output
-    // pipes keeps this generator open (nothing terminates it on a natural exit;
-    // the idle or overall timeout, or a cancel, ends the wait and kills the
-    // group). One that redirected its own stdio holds nothing, so it is left
-    // running as a deliberate daemon and outlives the step.
+    // Natural exit, as in a command step: a grandchild still holding the output
+    // pipes is terminated with the group (above); one that redirected its own
+    // stdio holds nothing, so it is left running as a deliberate daemon and
+    // outlives the step.
     // Adapters return as soon as they see the (possibly synthetic) exit, which
     // closes this generator. Await the process group here so workspace.dispose
     // cannot run while a SIGTERM-immune agent is still alive.
