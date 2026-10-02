@@ -36,6 +36,14 @@ export interface FileLockOptions {
   bestEffort?: boolean;
   /** Message prefix used in onWait / timeout errors. */
   label?: string;
+  /**
+   * How long releasing may wait for the sibling coordinator before it gives up
+   * and throws, leaving the lock in place. Default 5 min. Releasing must not
+   * leave the lock behind lightly, so this is far longer than any healthy hold.
+   */
+  releaseMaxWaitMs?: number;
+  /** Warn (through `onWait`) once a release has waited this long. Default 10s. */
+  releaseWarnAfterMs?: number;
 }
 
 export interface FileLockOutcome<T> {
@@ -54,6 +62,8 @@ const DEFAULT_MAX_WAIT_MS = 10 * 60_000;
 const DEFAULT_STALE_MS = 15 * 60_000;
 const DEFAULT_POLL_MS = 750;
 const STEAL_LOCK_ACQUIRE_ATTEMPTS = 8;
+const DEFAULT_RELEASE_MAX_WAIT_MS = 5 * 60_000;
+const DEFAULT_RELEASE_WARN_AFTER_MS = 10_000;
 
 /**
  * Run `fn` while holding an exclusive lock at `lockPath`. See
@@ -113,7 +123,16 @@ export async function withFileLock<T>(
   try {
     const value = await withCleanup(
       () => fn(true),
-      () => releaseIfOwned(lockPath, payload.token!),
+      () =>
+        releaseIfOwned(lockPath, payload.token!, {
+          maxWaitMs: opts.releaseMaxWaitMs ?? DEFAULT_RELEASE_MAX_WAIT_MS,
+          warnAfterMs: opts.releaseWarnAfterMs ?? DEFAULT_RELEASE_WARN_AFTER_MS,
+          now,
+          onSlow: (waitedMs) =>
+            opts.onWait?.(
+              `still waiting to release the ${label} (its coordinator has been held for ${Math.round(waitedMs / 1000)}s)`,
+            ),
+        }),
     );
     return { value, locked: true };
   } finally {
@@ -198,17 +217,40 @@ async function tryAcquire(lockPath: string, payload: LockPayload): Promise<boole
   );
 }
 
+/** How long {@link withStealLock} keeps trying, and what it says when slow. */
+interface StealWait {
+  /** Give up after this many attempts. Default {@link STEAL_LOCK_ACQUIRE_ATTEMPTS}. */
+  attempts?: number;
+  /** Give up after this long, however many attempts that takes. */
+  maxWaitMs?: number;
+  /** Call `onSlow` once after waiting this long. */
+  warnAfterMs?: number;
+  onSlow?: (waitedMs: number) => void;
+  now?: () => number;
+}
+
 async function withStealLock<T>(
   lockPath: string,
   fn: () => Promise<T>,
-  attempts = STEAL_LOCK_ACQUIRE_ATTEMPTS,
+  wait: StealWait = {},
 ): Promise<T | undefined> {
   const stealPath = `${lockPath}.steal`;
+  const { attempts = STEAL_LOCK_ACQUIRE_ATTEMPTS, maxWaitMs, warnAfterMs, onSlow } = wait;
+  const now = wait.now ?? Date.now;
+  const started = now();
+  let warned = false;
   for (let attempt = 0; attempt < attempts; attempt++) {
     const payload = newPayload();
     if (await tryAcquireStealLock(stealPath, payload)) {
       return withCleanup(fn, () => removeIfOwned(stealPath, payload.token!));
     }
+    const waited = now() - started;
+    // Warn first, so a stalled iteration that jumps past both still says so.
+    if (!warned && warnAfterMs !== undefined && waited >= warnAfterMs) {
+      warned = true;
+      onSlow?.(waited);
+    }
+    if (maxWaitMs !== undefined && waited >= maxWaitMs) return undefined;
     await abortableSleep(5);
   }
   return undefined;
@@ -245,8 +287,31 @@ async function reclaimAbandonedStealLock(stealPath: string): Promise<boolean> {
   return true;
 }
 
-async function releaseIfOwned(lockPath: string, token: string): Promise<void> {
-  await withStealLock(lockPath, () => removeIfOwned(lockPath, token), Number.POSITIVE_INFINITY);
+/**
+ * Remove our own lock under the coordinator. It waits for the coordinator
+ * rather than for a fixed number of tries, because leaving the lock behind
+ * blocks every other process, but not forever: a coordinator that is held by a
+ * live process that never lets go (or a file nobody can verify) would otherwise
+ * hang the run silently at its end.
+ */
+async function releaseIfOwned(
+  lockPath: string,
+  token: string,
+  wait: Required<Pick<StealWait, "maxWaitMs" | "warnAfterMs" | "now" | "onSlow">>,
+): Promise<void> {
+  const released = await withStealLock(
+    lockPath,
+    async () => {
+      await removeIfOwned(lockPath, token);
+      return true;
+    },
+    { attempts: Number.POSITIVE_INFINITY, ...wait },
+  );
+  if (!released) {
+    throw new Error(
+      `could not release ${lockPath}: its coordinator ${lockPath}.steal was still held after ${Math.round(wait.maxWaitMs / 1000)}s; the lock stays held until this process exits`,
+    );
+  }
 }
 
 async function removeIfOwned(path: string, token: string): Promise<void> {

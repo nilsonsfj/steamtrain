@@ -181,6 +181,45 @@ describe("file lock recovery invariants", () => {
     await expect(stat(steal)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it("gives up releasing after its ceiling, saying so, and keeps the callback's error as the cause", async () => {
+    const lock = await scratchLock();
+    const steal = `${lock}.steal`;
+    const notices: string[] = [];
+    const original = new Error("callback failed");
+    const failure = await withFileLock(
+      lock,
+      async () => {
+        // A live process holds the coordinator and never lets go.
+        await writeFile(steal, livePayload);
+        throw original;
+      },
+      {
+        releaseMaxWaitMs: 150,
+        releaseWarnAfterMs: 30,
+        label: "state lock",
+        onWait: (message) => notices.push(message),
+      },
+    ).catch((err: unknown) => err);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toMatch(/could not release .*\.steal was still held/);
+    expect((failure as Error).cause).toBe(original);
+    expect(notices.filter((n) => /still waiting to release the state lock/.test(n))).toHaveLength(
+      1,
+    );
+    // Nothing was removed outside the coordinator: the lock stays held, the
+    // coordinator is untouched.
+    expect(await readFile(steal, "utf8")).toBe(livePayload);
+    expect(JSON.parse(await readFile(lock, "utf8")).pid).toBe(process.pid);
+  });
+
+  it("does not warn about a release that is not slow", async () => {
+    const lock = await scratchLock();
+    const notices: string[] = [];
+    await withFileLock(lock, async () => "x", { onWait: (message) => notices.push(message) });
+    expect(notices).toEqual([]);
+    await expect(stat(lock)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("keeps the callback's error as the cause when releasing the lock also fails", async () => {
     const lock = await scratchLock();
     const original = new Error("callback failed");
