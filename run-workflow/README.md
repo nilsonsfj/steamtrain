@@ -133,10 +133,11 @@ Example: treat a gate rejection as a soft signal but a step error as hard:
   Publish with any JUnit reporter, e.g.
   [`mikepenz/action-junit-report`](https://github.com/mikepenz/action-junit-report).
 - **`json`** — a self-describing `steamtrain.run-report` document: outcome, exit
-  code, run metadata, totals, and every phase/step (failed steps carry their
-  truncated output so you can see the cause without digging through logs).
+  code, run metadata, totals, every phase/step (failed steps carry their
+  truncated output so you can see the cause without digging through logs), and
+  where each of the workflow's declared outputs was written.
 - **`markdown`** — a ready-to-post summary with an outcome badge, totals, the
-  failed steps, and a per-step table. Append it to `$GITHUB_STEP_SUMMARY` or post
+  failed steps, a per-step table, and the outputs list. Append it to `$GITHUB_STEP_SUMMARY` or post
   it as a PR comment.
 
 ## See also

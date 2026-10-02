@@ -211,7 +211,8 @@ describe("renderReport json", () => {
     });
     const parsed = JSON.parse(renderReport(rec, "json"));
     expect(parsed.schema).toBe("steamtrain.run-report");
-    expect(parsed.version).toBe(1);
+    expect(parsed.version).toBe(2);
+    expect(parsed.outputs).toEqual([]);
     expect(parsed.outcome).toBe("gate-failed");
     expect(parsed.exitCode).toBe(2);
     expect(parsed.run.workflow).toBe("demo");
@@ -225,6 +226,62 @@ describe("renderReport json", () => {
     const parsed = JSON.parse(renderReport(record(), "json", { outcome: "timeout" }));
     expect(parsed.outcome).toBe("timeout");
     expect(parsed.exitCode).toBe(3);
+  });
+});
+
+describe("report outputs", () => {
+  const outputs = [
+    {
+      key: "summary",
+      written: true,
+      path: "/tmp/demo/.steamtrain/outputs/demo/summary.md",
+      bytes: 12,
+    },
+    { key: "extra", written: false, path: "/tmp/demo/extra.md", error: "step 'x' failed" },
+  ];
+
+  it("lists each output in the json report", () => {
+    const parsed = JSON.parse(renderReport(record({ outputs }), "json"));
+    expect(parsed.outputs).toEqual(outputs);
+  });
+
+  it("adds an Outputs section to the markdown report, paths relative to the run's cwd", () => {
+    const md = renderReport(record({ outputs }), "markdown");
+    expect(md).toContain("### Outputs");
+    expect(md).toContain("- saved summary → .steamtrain/outputs/demo/summary.md");
+    expect(md).toContain("- not saved extra: step 'x' failed");
+  });
+
+  it("keeps a multi-line error on its own bullet and lists an output with no path", () => {
+    const md = renderReport(
+      record({
+        outputs: [
+          { key: "r", written: false, error: "step 'x' failed\n  at line 1\n\n# not a heading" },
+        ],
+      }),
+      "markdown",
+    );
+    expect(md).toContain("- not saved r: step 'x' failed at line 1 # not a heading");
+    expect(md).not.toContain("\n# not a heading");
+  });
+
+  it("shows a Windows cwd's outputs relative to it, and carries the description in json", () => {
+    const rec = record({
+      cwd: "C:\\work\\demo",
+      outputs: [
+        { key: "s", description: "the summary", written: true, path: "C:\\work\\demo\\out\\s.md" },
+      ],
+    });
+    expect(renderReport(rec, "markdown")).toContain("- saved s → out\\s.md");
+    expect(JSON.parse(renderReport(rec, "json")).outputs[0].description).toBe("the summary");
+  });
+
+  it("leaves junit without outputs", () => {
+    expect(renderReport(record({ outputs }), "junit")).not.toContain("summary.md");
+  });
+
+  it("omits the Outputs section when the run has none", () => {
+    expect(renderReport(record(), "markdown")).not.toContain("### Outputs");
   });
 });
 

@@ -1,5 +1,7 @@
 import { agentUiLabel } from "../agents";
+import { arrivalOutputLines } from "./arrival-report";
 import { formatElapsed, formatTokens, formatUsd, totalTokens } from "./cost";
+import type { WorkflowOutputResult } from "./events";
 import type { HistoryStep, RunRecord, RunRecordStatus } from "./history";
 
 /**
@@ -125,7 +127,11 @@ export function hasFailingGate(
 // ── report model ─────────────────────────────────────────────────────────────
 
 export const RUN_REPORT_SCHEMA = "steamtrain.run-report";
-export const RUN_REPORT_VERSION = 1;
+/**
+ * v2 added `outputs`: the run's declared outputs and where each was written.
+ * Everything else is as in v1, so a v1 consumer reading a v2 document keeps working.
+ */
+export const RUN_REPORT_VERSION = 2;
 
 /** Cap on per-step output embedded in a report so a document stays bounded. */
 const REPORT_STEP_OUTPUT_CAP = 4_000;
@@ -199,6 +205,22 @@ export interface RunReportModel {
   /** Steps that did not pass — the ones a CI reader cares about, up front. */
   failedSteps: ReportStep[];
   phases: ReportPhase[];
+  /**
+   * The workflow's declared outputs and what became of each. Empty when the
+   * workflow declares none (or the record predates outputs).
+   */
+  outputs: ReportOutput[];
+}
+
+export interface ReportOutput {
+  key: string;
+  description?: string;
+  written: boolean;
+  /** Absolute path of the file: where it was written, or would have been. */
+  path?: string;
+  bytes?: number;
+  /** Why it was not written. */
+  error?: string;
 }
 
 export function buildReportModel(
@@ -247,6 +269,18 @@ export function buildReportModel(
     ...(record.budget ? { budget: record.budget } : {}),
     failedSteps,
     phases,
+    outputs: (record.outputs ?? []).map(toReportOutput),
+  };
+}
+
+function toReportOutput(output: WorkflowOutputResult): ReportOutput {
+  return {
+    key: output.key,
+    ...(output.description ? { description: output.description } : {}),
+    written: output.written,
+    ...(output.path ? { path: output.path } : {}),
+    ...(output.bytes !== undefined ? { bytes: output.bytes } : {}),
+    ...(output.error ? { error: output.error } : {}),
   };
 }
 
@@ -406,6 +440,15 @@ function renderMarkdownReport(model: RunReportModel): string {
     }
   }
   lines.push("");
+  if (model.outputs.length > 0) {
+    lines.push("### Outputs");
+    lines.push("");
+    // An error can span lines (a stack, a filesystem message); keep each on its bullet.
+    for (const outLine of arrivalOutputLines(model.outputs, run.cwd)) {
+      lines.push(`- ${truncate(outLine, 400)}`);
+    }
+    lines.push("");
+  }
   lines.push(
     `_run ${run.id} · ${run.startedAt} → ${run.endedAt} · steamtrain ${RUN_REPORT_SCHEMA} v${RUN_REPORT_VERSION}_`,
   );

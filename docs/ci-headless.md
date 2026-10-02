@@ -34,18 +34,21 @@ Rules of thumb:
 
 ### Formats
 
-- **`json`** — a self-describing `steamtrain.run-report` (v1) document: the
+- **`json`** — a self-describing `steamtrain.run-report` (v2) document: the
   outcome and exit code, run metadata (id, workflow, input, timing), rolled-up
   totals (steps ok/failed/cached, cost, tokens), the cost-budget breach if any,
-  every phase and step, and a `failedSteps` array up front. Failed steps carry
-  their truncated output so you can see the cause without parsing logs.
+  every phase and step, a `failedSteps` array up front, and an `outputs` array
+  (`key`, `written`, `path`, `bytes` or `error`) saying where each of the
+  workflow's declared outputs went. Failed steps carry their truncated output so
+  you can see the cause without parsing logs.
 - **`markdown`** — a summary you can post as a PR comment or job step summary:
   an outcome badge, the totals line, the failed steps with their errors/output,
-  and a per-step table.
+  a per-step table, and an Outputs list when the workflow declares outputs.
 - **`junit`** — one `<testsuite>` per phase and one `<testcase>` per step; a
   failed step is a `<failure>` and a gate rejection is tagged
   `type="GateFailure"`. Feed it to any JUnit reporter (e.g.
   [`mikepenz/action-junit-report`](https://github.com/mikepenz/action-junit-report)).
+  JUnit has no place for run outputs, so it does not list them.
 
 ## Exit-code contract
 
