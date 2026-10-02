@@ -2336,7 +2336,7 @@ Global options (TUI and workflow commands):
       --read-only            Force every web UI session into read-only capability
                              (dedicated share bind; pairs with --auth-token or
                              --read-token, or alone on localhost)
-      --no-auth              Serve a non-local web UI bind without auth (unsafe;
+      --no-auth              Serve the web UI without auth (unsafe;
                              by default a token is auto-generated and printed)
       --trust-proxy          Honor X-Forwarded-* headers (only behind a reverse
                              proxy you control; needed for correct https cookies)

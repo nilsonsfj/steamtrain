@@ -342,7 +342,7 @@ Global options (TUI and workflow commands):
       --read-token <token>   Second web UI credential that mints a read-only
                              session (view only; or set STEAMTRAIN_READ_TOKEN)
       --read-only            Force every web UI session into read-only capability
-      --no-auth              Serve a non-local web UI bind without auth (unsafe)
+      --no-auth              Serve the web UI without auth (unsafe)
       --trust-proxy          Honor X-Forwarded-* headers (only behind a proxy
                              you run; required for correct https/Secure cookies)
 ```

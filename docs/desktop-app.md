@@ -135,7 +135,7 @@ have running. It learns the result from `--desktop-ready-json`, which prints one
 machine-readable line once the server is listening:
 
 ```json
-{"steamtrain":"ready","url":"http://127.0.0.1:38249","port":38249,"pid":8692}
+{"steamtrain":"ready","url":"http://127.0.0.1:38249","port":38249,"pid":8692,"authToken":"…"}
 ```
 
 That is the only stdout line that parses as JSON, so the app scans for it rather
@@ -212,8 +212,8 @@ The app learns about runs by polling `GET /api/runs` every few seconds rather
 than consuming the SSE stream. The stream is per-run and carries every step
 event; a dock badge and a notification about work that takes minutes need
 neither, and polling has no reconnect story to get wrong. Those requests are
-unauthenticated because the engine binds loopback with no token — if that ever
-changes, `run-watch.ts` is what breaks.
+authenticated with the per-launch token the engine generates even on loopback
+(`run-watch.ts` logs in with `POST /api/auth` and sends the session cookie).
 
 The UI is loaded over `http://127.0.0.1:<port>` rather than `file://` or a
 custom scheme. That is required, not incidental: the server enforces same-origin
