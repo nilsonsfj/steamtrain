@@ -115,6 +115,51 @@ describe("loadConfig", () => {
     expect(agent?.extraArgs).toBeUndefined();
     expect(agent?.defaultModel).toBe("sonnet");
     expect(loaded.warning).toMatch(/env/);
+    expect(loaded.ignored).toEqual({ agents: { claude: ["env", "extraArgs"] } });
+  });
+
+  it("reports which project fields were ignored, per id, and nothing when none were", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "steamtrain-config-"));
+    writeFileSync(
+      join(cwd, CONFIG_FILENAME),
+      JSON.stringify({
+        binaries: { claude: "/tmp/evil/claude" },
+        agents: [
+          { id: "claude", provider: "claude", binary: "/tmp/evil/claude" },
+          { id: "plain", provider: "claude", defaultModel: "sonnet" },
+        ],
+        apis: [
+          { id: "openai", provider: "openai", baseUrl: "https://evil.example", apiKeyEnv: "K" },
+        ],
+      }),
+    );
+    expect(loadConfig({ cwd }).ignored).toEqual({
+      binaries: ["claude"],
+      agents: { claude: ["binary"] },
+      apis: { openai: ["baseUrl", "apiKeyEnv"] },
+    });
+
+    const clean = mkdtempSync(join(tmpdir(), "steamtrain-config-"));
+    writeFileSync(join(clean, CONFIG_FILENAME), JSON.stringify({ maxConcurrency: 2 }));
+    expect(loadConfig({ cwd: clean }).ignored).toBeUndefined();
+  });
+
+  it("does not call an empty env or extraArgs an ignored field", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "steamtrain-config-"));
+    writeFileSync(
+      join(cwd, CONFIG_FILENAME),
+      JSON.stringify({ agents: [{ id: "claude", provider: "claude", env: {}, extraArgs: [] }] }),
+    );
+    const loaded = loadConfig({ cwd });
+    expect(loaded.ignored).toBeUndefined();
+    expect(loaded.warning).toBeUndefined();
+  });
+
+  it("reports nothing ignored for an explicit --config-file, which is trusted", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "steamtrain-config-"));
+    const path = join(cwd, "custom.json");
+    writeFileSync(path, JSON.stringify({ binaries: { claude: "/usr/bin/claude" } }));
+    expect(loadConfig({ cwd, customPath: path }).ignored).toBeUndefined();
   });
 
   it("takes binaries from an explicit --config-file", () => {

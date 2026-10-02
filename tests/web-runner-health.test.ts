@@ -173,6 +173,8 @@ interface Mounted {
   navFoot: () => string;
   /** Flattened text of the section footer band. */
   foot: () => string;
+  /** Flattened text of each note panel. */
+  notes: () => string[];
 }
 
 /**
@@ -188,6 +190,9 @@ async function mountSettings(opts: {
   maxConcurrency?: number;
   version?: string;
   cadence?: string;
+  /** What GET /api/config says the trust filter ignored, by id. */
+  ignored?: Record<string, unknown>;
+  loadWarning?: string;
   /** What GET /api/runner-usage answers with, for the Runs column. */
   usage?: { runs: number; counts: Record<string, number>; available: boolean };
 }): Promise<Mounted> {
@@ -201,6 +206,8 @@ async function mountSettings(opts: {
     version: opts.version,
     agents: opts.agents ?? [],
     apis: opts.apis ?? [],
+    ignored: opts.ignored ?? {},
+    loadWarning: opts.loadWarning,
   };
   let cadencePref = opts.cadence ?? "launch";
   const puts: Record<string, unknown>[] = [];
@@ -345,6 +352,7 @@ async function mountSettings(opts: {
     cols: () => (byClass(root, "runner-cols")[0]?.children ?? []).map((c) => flatText(c)),
     navFoot,
     foot,
+    notes: () => byClass(root, "settings-note").map((n) => flatText(n)),
   };
 }
 
@@ -376,6 +384,58 @@ describe("runners settings table", () => {
     expect(kiro?.cls).toContain("off");
     expect(kiro?.text).toContain("disabled");
     expect(kiro?.actions).toEqual(["off", "Edit", "×"]);
+  });
+
+  it("marks project-scope fields the trust filter ignored, and stops showing them as live", async () => {
+    const ui = await mountSettings({
+      agents: [
+        {
+          id: "mine",
+          provider: "claude",
+          scope: "project",
+          binary: "/tmp/evil",
+          extraArgs: ["--x"],
+        },
+        { id: "theirs", provider: "claude", scope: "user", binary: "/usr/bin/claude" },
+      ],
+      apis: [{ id: "gw", provider: "openai", scope: "project", baseUrl: "https://evil.example" }],
+      ignored: {
+        agents: { mine: ["binary", "extraArgs"], theirs: ["binary"] },
+        apis: { gw: ["baseUrl"] },
+      },
+    });
+    const rows = ui.rows();
+    const mine = rows.find((r) => r.text.startsWith("mine"));
+    expect(mine?.text).toContain("inert until trusted: binary, extraArgs");
+    expect(mine?.text).not.toContain("/tmp/evil");
+    expect(mine?.text).not.toContain("--x");
+    const gw = rows.find((r) => r.text.startsWith("gw"));
+    expect(gw?.text).toContain("inert until trusted: baseUrl");
+    expect(gw?.text).not.toContain("evil.example");
+    // The same id in the global file is a different entry, and is in effect.
+    const theirs = rows.find((r) => r.text.startsWith("theirs"));
+    expect(theirs?.text).not.toContain("inert");
+    expect(theirs?.text).toContain("/usr/bin/claude");
+  });
+
+  it("does not mistake an id like toString for an ignored entry", async () => {
+    const ui = await mountSettings({
+      agents: [{ id: "toString", provider: "claude", scope: "project", binary: "/usr/bin/x" }],
+      ignored: { agents: { other: ["binary"] } },
+    });
+    const row = ui.rows().find((r) => r.text.startsWith("toString"));
+    expect(row?.text).toContain("/usr/bin/x");
+    expect(row?.text).not.toContain("inert");
+  });
+
+  it("shows the config load warning, and no note when there is none", async () => {
+    const warned = await mountSettings({
+      loadWarning: "project steamtrain.json `binaries` ignored",
+    });
+    expect(warned.notes().join(" ")).toContain(
+      "Config warning: project steamtrain.json `binaries` ignored",
+    );
+    expect((await mountSettings({})).notes()).toEqual([]);
   });
 
   it("offers on/off, Edit, and remove on every row", async () => {

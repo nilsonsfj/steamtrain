@@ -37,9 +37,23 @@ export interface ConfigLoadOptions {
   customPath?: string;
 }
 
+/**
+ * What the trust filter dropped from an untrusted project file (see
+ * {@link mergeConfig}): the fields that are written in the file but inert.
+ * `agents` and `apis` are keyed by instance id.
+ */
+export interface IgnoredProjectFields {
+  /** Names in the file's `binaries` map. */
+  binaries?: string[];
+  agents?: Record<string, string[]>;
+  apis?: Record<string, string[]>;
+}
+
 export interface LoadedConfig {
   config: SteamtrainConfig;
   scope: ConfigScope;
+  /** Fields of the project file the trust filter ignored; absent when nothing was. */
+  ignored?: IgnoredProjectFields;
   /** Global `~/.steamtrain/config.json` layer (absent for custom-path loads). */
   user?: { path: string; exists: boolean };
   /** Raw agent entries from the global config file (for scoped saves). */
@@ -175,12 +189,13 @@ function loadConfigFile(path: string, scope: ConfigScope, base: SteamtrainConfig
     };
   }
 
-  const { config, warnings } = mergeConfig(base, result.data, {
+  const { config, warnings, ignored } = mergeConfig(base, result.data, {
     trustExecutables: scope.kind === "custom",
   });
   return {
     config,
     scope,
+    ...(ignored ? { ignored } : {}),
     projectAgents: result.data.agents,
     projectApis: result.data.apis,
     warning: joinWarnings(legacyTasks, warnings.length > 0 ? warnings.join("; ") : undefined),
@@ -225,15 +240,17 @@ export function mergeConfig(
   base: SteamtrainConfig,
   override: ConfigFile,
   options: { trustExecutables?: boolean } = {},
-): { config: SteamtrainConfig; warnings: string[] } {
+): { config: SteamtrainConfig; warnings: string[]; ignored?: IgnoredProjectFields } {
   const trust = options.trustExecutables !== false;
   const warnings: string[] = [];
+  let ignored: IgnoredProjectFields | undefined;
   let binaries = { ...base.binaries, ...override.binaries };
   let agents = mergeAgentLists(base.agents, override.agents);
   let apis = mergeInstanceLists(base.apis, override.apis);
   if (!trust) {
     binaries = { ...base.binaries };
     if (override.binaries && Object.keys(override.binaries).length > 0) {
+      ignored = { ...ignored, binaries: Object.keys(override.binaries) };
       warnings.push(
         "project steamtrain.json `binaries` ignored until the project is trusted (use ~/.steamtrain/config.json or --config-file)",
       );
@@ -241,7 +258,17 @@ export function mergeConfig(
     // `env` (PATH, LD_PRELOAD, NODE_OPTIONS, …) and `extraArgs` (config /
     // plugin loading flags) can select or alter the executable just as `binary`
     // does, so all three are trust-gated together.
-    if (override.agents?.some((agent) => agent.binary || agent.env || agent.extraArgs)) {
+    const droppedByAgent: Record<string, string[]> = {};
+    for (const agent of override.agents ?? []) {
+      const dropped = [
+        agent.binary ? "binary" : "",
+        agent.env && Object.keys(agent.env).length > 0 ? "env" : "",
+        agent.extraArgs?.length ? "extraArgs" : "",
+      ].filter(Boolean);
+      if (dropped.length > 0) droppedByAgent[agent.id] = dropped;
+    }
+    if (override.agents && Object.keys(droppedByAgent).length > 0) {
+      ignored = { ...ignored, agents: droppedByAgent };
       agents = mergeAgentLists(
         base.agents,
         override.agents.map(
@@ -253,6 +280,14 @@ export function mergeConfig(
       );
     }
     if (override.apis?.some((api) => api.baseUrl || api.apiKeyEnv)) {
+      const fields: Record<string, string[]> = {};
+      for (const api of override.apis) {
+        const dropped = [api.baseUrl ? "baseUrl" : "", api.apiKeyEnv ? "apiKeyEnv" : ""].filter(
+          Boolean,
+        );
+        if (dropped.length > 0) fields[api.id] = dropped;
+      }
+      ignored = { ...ignored, apis: fields };
       apis = mergeInstanceLists(
         base.apis,
         override.apis.map(({ baseUrl: _baseUrl, apiKeyEnv: _apiKeyEnv, ...rest }) => rest),
@@ -279,7 +314,7 @@ export function mergeConfig(
   const { workflows, warning } = mergeWorkflowMap({}, {}, override.workflows, "project");
   if (Object.keys(workflows).length > 0) merged.workflows = workflows;
   if (warning) warnings.push(warning);
-  return { config: merged, warnings };
+  return { config: merged, warnings, ...(ignored ? { ignored } : {}) };
 }
 
 /**

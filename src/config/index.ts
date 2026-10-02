@@ -17,6 +17,7 @@ export {
   type ConfigLoadOptions,
   type ConfigScope,
   type ConfigScopeKind,
+  type IgnoredProjectFields,
   type LoadedConfig,
   configDisplayLabel,
   loadConfig,

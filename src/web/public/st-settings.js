@@ -280,6 +280,9 @@
     runnersBanner = h("div", { class: "mbanner" });
     if (runnersNotice) { ST.modals.mbanner(runnersBanner, runnersNotice.text, runnersNotice.kind); runnersNotice = null; }
     wrap.appendChild(runnersBanner);
+    if (S.projectConfig.loadWarning) {
+      wrap.appendChild(h("div", { class: "settings-note", text: "Config warning: " + S.projectConfig.loadWarning }));
+    }
     wrap.appendChild(buildTallyStrip());
     wrap.appendChild(buildPathDetail());
     wrap.appendChild(buildRunnerTable());
@@ -437,7 +440,8 @@
     });
   }
   function agentRowsData() {
-    var seen = {};
+    // No prototype: an id such as "toString" must not read as already seen.
+    var seen = Object.create(null);
     var rows = (S.doctor || []).map(function (d) {
       seen[d.agent] = true;
       return { id: d.agent, doctor: d, config: findAgent(d.agent) };
@@ -448,7 +452,8 @@
     return sortRows("agent", rows);
   }
   function apiRowsData() {
-    var seen = {};
+    // No prototype: an id such as "toString" must not read as already seen.
+    var seen = Object.create(null);
     var rows = (S.apiDoctor || []).map(function (d) {
       seen[d.api] = true;
       return { id: d.api, doctor: d, config: findApi(d.api) };
@@ -535,9 +540,26 @@
     return box;
   }
 
+  /**
+   * Fields the project file sets that the server ignores until the project is
+   * trusted (a project steamtrain.json may not set a binary, env, extra args,
+   * endpoint or key variable). Only a project-scope row is affected: the same id
+   * in the global file is not.
+   */
+  function inertFields(kind, rowData) {
+    var cfg = rowData.config;
+    var ignored = S.projectConfig && S.projectConfig.ignored;
+    if (!cfg || cfg.scope !== "project" || !ignored) return [];
+    var byId = ignored[kind === "agent" ? "agents" : "apis"];
+    // An id such as "toString" must not find an inherited property.
+    var fields = byId && Object.prototype.hasOwnProperty.call(byId, rowData.id) ? byId[rowData.id] : null;
+    return Array.isArray(fields) ? fields : [];
+  }
+
   function buildRow(kind, rowData) {
     var d = rowData.doctor;
     var cfg = rowData.config;
+    var inert = inertFields(kind, rowData);
     var status = d ? d.status : "ok";
     var meta = kind === "agent" ? agentHealthMeta(status) : apiHealthMeta(status);
     // A disabled runner is never probed again, so whatever the doctor last said
@@ -552,16 +574,22 @@
 
     var binaryText, subParts = [];
     if (kind === "agent") {
-      binaryText = (d && (d.binaryPath || d.binary)) || (cfg && cfg.binary) || "(default binary)";
+      binaryText = (d && (d.binaryPath || d.binary)) ||
+        (cfg && inert.indexOf("binary") < 0 && cfg.binary) || "(default binary)";
       if (ready && d && d.version) subParts.push(d.version);
-      if (cfg && cfg.extraArgs && cfg.extraArgs.length) subParts.push(JSON.stringify(cfg.extraArgs));
+      if (cfg && inert.indexOf("extraArgs") < 0 && cfg.extraArgs && cfg.extraArgs.length) subParts.push(JSON.stringify(cfg.extraArgs));
     } else {
-      binaryText = (cfg && cfg.baseUrl) || (d && d.baseUrl) || "(provider default endpoint)";
-      if (cfg && cfg.apiKeyEnv) subParts.push(cfg.apiKeyEnv);
+      binaryText = (cfg && inert.indexOf("baseUrl") < 0 && cfg.baseUrl) || (d && d.baseUrl) || "(provider default endpoint)";
+      if (cfg && inert.indexOf("apiKeyEnv") < 0 && cfg.apiKeyEnv) subParts.push(cfg.apiKeyEnv);
     }
+    if (inert.length) subParts.push("inert until trusted: " + inert.join(", "));
     if (off) subParts.unshift("disabled");
-    var detailEl = h("span", { class: "detail" + (loud ? " warn" : "") }, binaryText,
-      subParts.length ? h("span", { class: "sub", text: "  " + subParts.join(" · ") }) : null);
+    var detailEl = h("span", {
+      class: "detail" + (loud ? " warn" : ""),
+      title: inert.length
+        ? "A project steamtrain.json can't set " + inert.join(", ") + " yet. Move it to ~/.steamtrain/config.json or pass --config-file."
+        : null
+    }, binaryText, subParts.length ? h("span", { class: "sub", text: "  " + subParts.join(" · ") }) : null);
 
     var modelText = (cfg && cfg.defaultModel) || "(provider default)";
     var scopeText = cfg ? (cfg.scope === "project" ? "project" : "global") : "global (default)";

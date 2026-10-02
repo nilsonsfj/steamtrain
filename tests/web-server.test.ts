@@ -1800,6 +1800,45 @@ describe("web server", () => {
     expect(JSON.parse(readFileSync(configPath, "utf8"))).toMatchObject({ maxConcurrency: 7 });
   });
 
+  it("GET /api/config reports the project fields the trust filter ignored, and the load warning", async () => {
+    const host = new FakeHost(demoSpec(), happyRun);
+    const runs = new WorkflowRunManager({
+      host,
+      cacheStore: createInMemoryStore(),
+      cwd: tmpdir(),
+      config: testRunConfig,
+    });
+    const dir = mkdtempSync(join(tmpdir(), "st-cfg-ignored-"));
+    tempRoots.push(dir);
+    const configPath = join(dir, "steamtrain.json");
+    writeFileSync(configPath, "{}\n");
+    const configLayers = {
+      projectAgents: [{ id: "claude", provider: "claude" as const, binary: "/tmp/evil" }],
+      ignored: { agents: { claude: ["binary"] } },
+      warning: "project steamtrain.json agent `binary` ignored until the project is trusted",
+    };
+    const server = createWebServer({ host, runs, config: {}, configPath, configLayers });
+    servers.push(server);
+    const base = await start(server);
+    const body = (await (await fetch(`${base}/api/config`)).json()) as {
+      ignored: unknown;
+      loadWarning: string;
+    };
+    expect(body.ignored).toEqual({ agents: { claude: ["binary"] } });
+    expect(body.loadWarning).toMatch(/ignored until the project is trusted/);
+
+    // Nothing ignored: an empty object, so the page never has to guard for undefined.
+    const bare = createWebServer({ host, runs, config: {}, configPath });
+    servers.push(bare);
+    const bareBody = (await (await fetch(`${await start(bare)}/api/config`)).json()) as {
+      ignored: unknown;
+      loadWarning: unknown;
+    };
+    expect(bareBody.ignored).toEqual({});
+    // null, not absent: the page merges a save's response over its copy.
+    expect(bareBody.loadWarning).toBeNull();
+  });
+
   it("PUT /api/config allows the same agent id in both user and project scopes", async () => {
     const host = new FakeHost(demoSpec(), happyRun);
     const runs = new WorkflowRunManager({

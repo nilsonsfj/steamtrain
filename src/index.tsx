@@ -77,12 +77,21 @@ async function main(): Promise<void> {
   }
 
   const home = homedir();
-  const { config, scope, user, userAgents, projectAgents, userApis, projectApis, warning } =
-    loadConfig({
-      cwd,
-      customPath: configPath,
-      home,
-    });
+  const {
+    config,
+    scope,
+    user,
+    userAgents,
+    projectAgents,
+    userApis,
+    projectApis,
+    ignored,
+    warning,
+  } = loadConfig({
+    cwd,
+    customPath: configPath,
+    home,
+  });
   const project = resolveProjectIdentity(cwd, { home, configName: config.name });
   const { settings, hasUserFile, warning: settingsWarning } = loadSettings(home);
   const configLabel = configDisplayLabel(scope, {
@@ -140,6 +149,8 @@ async function main(): Promise<void> {
         projectAgents,
         userApis,
         projectApis,
+        ignoredFields: ignored,
+        configWarning: warning,
         customConfig: scope.kind === "custom",
         home,
         port,

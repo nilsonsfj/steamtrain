@@ -8,7 +8,12 @@ import { buildAgentMeta } from "../agents/agent-meta";
 import { listModelClasses, listModelFamilyMeta } from "../agents/model-resolve";
 import { refreshAgentCatalogCaches } from "../agents/models";
 import { buildApiMeta } from "../apis";
-import type { AgentInstanceConfig, ApiInstanceConfig, SteamtrainConfig } from "../config";
+import type {
+  AgentInstanceConfig,
+  ApiInstanceConfig,
+  IgnoredProjectFields,
+  SteamtrainConfig,
+} from "../config";
 import {
   DEFAULT_CONFIG,
   loadConfig,
@@ -235,6 +240,10 @@ export interface WebServerDeps {
     projectAgents?: AgentInstanceConfig[];
     userApis?: ApiInstanceConfig[];
     projectApis?: ApiInstanceConfig[];
+    /** What the trust filter ignored in the project file (see `IgnoredProjectFields`). */
+    ignored?: IgnoredProjectFields;
+    /** The load warning for the project file, if any. */
+    warning?: string;
   };
   /**
    * Reload defaults → user → project into {@link config} + {@link configLayers}
@@ -1211,6 +1220,12 @@ async function handle(
       // file they live in. New rows in the editor default to user/global.
       agents: tagAgentsWithScope(layers),
       apis: tagApisWithScope(layers),
+      // Written in the project file but ignored until trusted: the Settings
+      // rows must not present these as the live values.
+      ignored: layers.ignored ?? {},
+      // null, not undefined: a PUT response is merged over the page's copy, and a key
+      // JSON drops would leave a cleared warning on screen.
+      loadWarning: layers.warning ?? null,
       // Full catalogs for health dots / model pickers in the config modal.
       agentCatalog: buildAgentMeta(
         cfg,
@@ -1422,6 +1437,12 @@ async function handle(
       canGlobal,
       agents: tagAgentsWithScope(layers),
       apis: tagApisWithScope(layers),
+      // Written in the project file but ignored until trusted: the Settings
+      // rows must not present these as the live values.
+      ignored: layers.ignored ?? {},
+      // null, not undefined: a PUT response is merged over the page's copy, and a key
+      // JSON drops would leave a cleared warning on screen.
+      loadWarning: layers.warning ?? null,
       agentCatalog: buildAgentMeta(
         deps.config,
         (agent) => (deps.doctor?.() ?? []).some((d) => d.agent === agent && d.status === "ok"),
@@ -2875,6 +2896,10 @@ export interface StartWebUiOptions {
   userApis?: ApiInstanceConfig[];
   /** Raw API entries from the project (or custom) config file. */
   projectApis?: ApiInstanceConfig[];
+  /** Fields of the project file the trust filter ignored. */
+  ignoredFields?: IgnoredProjectFields;
+  /** Non-fatal problem found loading the config (e.g. fields ignored until trusted). */
+  configWarning?: string;
   /**
    * True when `configPath` is a custom `--config` file (loads alone, no user
    * layer). Affects reload after scoped saves.
@@ -3007,6 +3032,8 @@ export async function startWebUi(options: StartWebUiOptions): Promise<{
     projectAgents: options.projectAgents ? [...options.projectAgents] : undefined,
     userApis: options.userApis ? [...options.userApis] : undefined,
     projectApis: options.projectApis ? [...options.projectApis] : undefined,
+    ignored: options.ignoredFields,
+    warning: options.configWarning,
   };
   const reloadLiveConfig = (): void => {
     const loaded = loadConfig(
@@ -3023,6 +3050,8 @@ export async function startWebUi(options: StartWebUiOptions): Promise<{
     liveLayers.projectAgents = loaded.projectAgents ? [...loaded.projectAgents] : undefined;
     liveLayers.userApis = loaded.userApis ? [...loaded.userApis] : undefined;
     liveLayers.projectApis = loaded.projectApis ? [...loaded.projectApis] : undefined;
+    liveLayers.ignored = loaded.ignored;
+    liveLayers.warning = loaded.warning;
   };
 
   const orchestrator = new Orchestrator(
