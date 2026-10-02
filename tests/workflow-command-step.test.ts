@@ -780,6 +780,52 @@ describe("runShellCommand", () => {
     expect(alive).toBe(false);
   });
 
+  it("lets a background process that redirected its own output outlive the step", async () => {
+    if (process.platform === "win32") return;
+    const cwd = await tempDir();
+    const pidFile = join(cwd, "daemon.pid");
+    const started = Date.now();
+    const result = await runShellCommand(
+      `sleep 30 >/dev/null 2>&1 & echo $! > "${pidFile}"; echo done`,
+      { cwd },
+    );
+    const pid = Number((await readFile(pidFile, "utf8")).trim());
+    try {
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("done");
+      // Returned at once: nothing held the pipes, so there was nothing to wait for.
+      expect(Date.now() - started).toBeLessThan(2000);
+      expect(pid).toBeGreaterThan(0);
+      expect(() => process.kill(pid, 0)).not.toThrow();
+    } finally {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // already gone
+      }
+    }
+  });
+
+  it("terminates a plain nohup background process, which still holds the output pipes", async () => {
+    if (process.platform === "win32") return;
+    const cwd = await tempDir();
+    const pidFile = join(cwd, "nohup.pid");
+    const result = await runShellCommand(`nohup sleep 30 & echo $! > "${pidFile}"; echo done`, {
+      cwd,
+      killGraceMs: 400,
+    });
+    expect(result.output).toContain("done");
+    const pid = Number((await readFile(pidFile, "utf8")).trim());
+    let alive = true;
+    try {
+      process.kill(pid, 0);
+    } catch (err) {
+      alive = (err as NodeJS.ErrnoException).code !== "ESRCH";
+    }
+    if (alive) process.kill(pid, "SIGKILL");
+    expect(alive).toBe(false);
+  });
+
   it("does not hang when a background grandchild keeps stdout open", async () => {
     const cwd = await tempDir();
     const pidFile = join(cwd, "bg.pid");

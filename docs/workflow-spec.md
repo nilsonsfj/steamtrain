@@ -903,6 +903,21 @@ renderer cannot see inside a nested script that you write yourself, such as
 `sh -c '…'` or `eval`: data placed in one is re-parsed by the inner shell, so
 pass it through `env` and reference the variable there instead.
 
+A command step ends when its shell exits. A background process the command
+started that still holds the step's output pipes (`cmd &`, and a plain
+`nohup cmd &`, which only blocks SIGHUP) is terminated (SIGTERM, then SIGKILL)
+and reaped before the step reports, so it cannot keep writing to the workspace
+after the step settled. One that redirected its own output (`cmd >log 2>&1 &`)
+is taken for a deliberate daemon and keeps running after the step: steamtrain
+cannot tell it from a leaked one, so stop it yourself, for example in a later
+command step. A timeout or a cancel kills the whole process group, redirected
+or not, except a process that left the group with `setsid`.
+
+Agent steps leave a redirected daemon running in the same way, but they do not
+terminate a background process that still holds the output pipes when the agent
+exits: the step keeps waiting for the pipes to close until its idle or overall
+timeout.
+
 A typical trustworthy fix loop:
 
 ```jsonc
