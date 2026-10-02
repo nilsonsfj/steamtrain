@@ -135,8 +135,11 @@ async function startWebServer(projectDir: string): Promise<LaunchedServer> {
   });
 
   let stopping: Promise<void> | undefined;
+  const url = ready.authToken
+    ? `${ready.url.replace(/\/$/, "")}/?token=${ready.authToken}`
+    : ready.url;
   return {
-    url: ready.url,
+    url,
     child,
     output: () => chunks.join(""),
     stop: async () => {

@@ -17,6 +17,7 @@ import {
 import {
   LIVE_RUN_HEARTBEAT_STALE_MS,
   LIVE_RUN_META_VERSION,
+  LIVE_RUN_ORPHAN_GRACE_MS,
   type LiveRunMeta,
   createLiveRunStore,
   isLiveRunOwnerAlive,
@@ -72,6 +73,16 @@ describe("live-run store", () => {
     expect((await store.get("a"))?.status).toBe("running");
     const listed = await store.list({ sweep: false });
     expect(listed.map((r) => r.id)).toEqual(["b", "a"]);
+  });
+
+  it("ignores stray files in the runs directory so they cannot block the queue", async () => {
+    const root = tempDir();
+    const store = createLiveRunStore(root);
+    await store.create(meta("good"));
+    await writeFile(join(root, ".DS_Store"), "junk", "utf8");
+    const listed = await store.list({ sweep: false });
+    expect(listed.map((r) => r.id)).toEqual(["good"]);
+    expect(await acquireRunSlot(store, "good", 1, { pollMs: 5 })).toEqual({ ok: true });
   });
 
   it("ignores corrupt and wrong-version meta files", async () => {
@@ -503,6 +514,47 @@ describe("live-run owner liveness / queue promote", () => {
     ).toBe(true);
     // Legacy metas without heartbeat keep the pid-only check.
     expect(isLiveRunOwnerAlive({ pid: process.pid, createdAt: now }, now)).toBe(true);
+  });
+
+  it("keeps a pid:-1 handoff alive from heartbeatAt, not createdAt", () => {
+    const now = Date.now();
+    expect(
+      isLiveRunOwnerAlive(
+        {
+          pid: -1,
+          createdAt: now - 5 * 60_000,
+          heartbeatAt: now - 1_000,
+        },
+        now,
+      ),
+    ).toBe(true);
+    expect(
+      isLiveRunOwnerAlive(
+        {
+          pid: -1,
+          createdAt: now - 5 * 60_000,
+          heartbeatAt: now - LIVE_RUN_ORPHAN_GRACE_MS - 1,
+        },
+        now,
+      ),
+    ).toBe(false);
+  });
+
+  it("refreshes heartbeatAt while waiting in the queue", async () => {
+    const store = createLiveRunStore(tempDir());
+    await store.create(meta("hog", { pid: process.pid }));
+    expect(await acquireRunSlot(store, "hog", 1, { pollMs: 5 })).toEqual({ ok: true });
+    const stale = Date.now() - LIVE_RUN_HEARTBEAT_STALE_MS - 1;
+    await store.create(
+      meta("waiter", { pid: process.pid, createdAt: Date.now(), heartbeatAt: stale }),
+    );
+    const waiting = acquireRunSlot(store, "waiter", 1, { pollMs: 5 });
+    await vi.waitFor(async () => {
+      const hb = (await store.get("waiter"))?.heartbeatAt ?? 0;
+      expect(hb).toBeGreaterThan(stale);
+    });
+    await store.update("hog", { status: "done", endedAt: Date.now() });
+    expect(await waiting).toEqual({ ok: true });
   });
 
   it("tryPromote promotes under the lock and refuses a second claim", async () => {

@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it, vi } from "vitest";
 import { type WorkflowEvent, type WorkflowSpec, runWorkflow } from "../src/workflow";
 
 /**
@@ -113,5 +116,47 @@ describe("a step that failed on its own just before the cancel", () => {
     expect(failed).toMatchObject({ ok: false, error: "HTTP 400: bad request" });
     expect(failed?.interrupted).toBeUndefined();
     expect(cut).toMatchObject({ ok: false, interrupted: true });
+  });
+});
+
+describe("closing the workflow generator", () => {
+  it("aborts in-flight commands so worktrees are not reclaimed under a live process", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "steamtrain-gen-close-"));
+    const pidFile = join(dir, "pid");
+    const spec: WorkflowSpec = {
+      name: "close",
+      phases: [
+        {
+          id: "p1",
+          title: "Slow",
+          steps: [{ id: "slow", kind: "command", cmd: `echo $$ > "${pidFile}"; sleep 30` }],
+        },
+      ],
+    };
+    const gen = runWorkflow(
+      spec,
+      { input: "task" },
+      {
+        createAdapter: () => {
+          throw new Error("no agents");
+        },
+        maxConcurrency: 1,
+        cwd: dir,
+      },
+    );
+    for await (const ev of gen) {
+      if (ev.kind === "step_start" && ev.stepId === "slow") {
+        await vi.waitFor(() => readFileSync(pidFile, "utf8").trim().length > 0);
+        break;
+      }
+    }
+    const pid = Number(readFileSync(pidFile, "utf8").trim());
+    expect(pid).toBeGreaterThan(0);
+    try {
+      process.kill(pid, 0);
+      expect.fail("command still alive after the generator closed");
+    } catch (err) {
+      expect((err as NodeJS.ErrnoException).code).toBe("ESRCH");
+    }
   });
 });

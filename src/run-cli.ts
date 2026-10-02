@@ -12,6 +12,7 @@ import {
   type ApprovalProvider,
   type HumanInputProvider,
   type LiveRunMeta,
+  type LiveRunPublisher,
   type LiveRunSource,
   type ModelUsage,
   type ReportFormat,
@@ -791,7 +792,7 @@ export async function runDetachedRunner(
     err(`unknown detached run '${runId}' (no launch metadata)\n`);
     return 1;
   }
-  await store.update(runId, { pid: process.pid });
+  await store.update(runId, { pid: process.pid, heartbeatAt: Date.now() });
 
   // Crash safety: this process OWNS the run — an uncaught exception or
   // unhandled rejection must settle the registry entry as errored instead of
@@ -1076,13 +1077,13 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<Drive
   }
 
   const ac = new AbortController();
-  const disposeSignals = options.installSignalHandlers(() => ac.abort());
-  const disposeCancelWatch = watchRunCancel(store, runId, () => ac.abort());
-  // Mid-run steering: any attached UI (TUI /pause key, web button, `steamtrain
-  // workflow pause|resume|edit-step`) writes control files; this watcher
-  // applies them to the run.
-  const control = createWorkflowRunControl();
-  const disposeControlWatch = watchRunControl(store, runId, control);
+  let disposeSignals = (): void => {};
+  let disposeCancelWatch = (): void => {};
+  let disposeControlWatch = (): void => {};
+  let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
+  let publisher: LiveRunPublisher | undefined;
+  let settled = false;
+  let timedOut = false;
 
   const recorder = new RunRecordBuilder({
     id: runId,
@@ -1096,68 +1097,74 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<Drive
   // loop passes it finished (and their spend) would be missing from history.
   if (options.priorOwner) recorder.continueFrom(options.priorOwner.events);
 
-  // Wait for a queue slot; runs beyond `maxParallelRuns` queue instead of
-  // colliding over the step cache and git worktrees.
-  let lastQueuePosition = -1;
-  const slot = await acquireRunSlot(store, runId, resolveMaxParallelRuns(config), {
-    signal: ac.signal,
-    onQueued: (position, running, limit) => {
-      if (position === lastQueuePosition) return;
-      lastQueuePosition = position;
-      err(
-        `queued: ${running}/${limit} run slots busy — position ${position}; waiting (cancel with Ctrl+C or 'steamtrain workflow cancel ${runId}')\n`,
-      );
-    },
-  });
-  if (!slot.ok) {
-    disposeSignals();
-    disposeCancelWatch();
-    disposeControlWatch();
-    await store.update(runId, { status: "canceled", ok: false, endedAt: Date.now() });
-    const record = await saveHistory(historyStore, recorder, "canceled", err);
-    err("run canceled while queued\n");
-    return { code: exitCodeForOutcome("canceled"), outcome: "canceled", record };
-  }
-
-  const key = workflowCacheKey(name, input, cwd, spec, params);
-  let cache: Map<string, StepResult>;
-  if (options.fresh) {
-    await cacheStore.clear(key);
-    cache = new Map();
-  } else {
-    // Run on this very map, not a copy: saves track the engine's drops by it.
-    cache = await cacheStore.load(key);
-  }
-  if (options.seed && options.seed.size > 0) {
-    // Seed the already-succeeded steps and make them the resume baseline so an
-    // interrupted retry can pick up from here too.
-    for (const [stepId, result] of options.seed) cache.set(stepId, result);
-    await cacheStore.save(key, cache);
-  }
-
-  // Enforce whole-workflow wall-clock timeout (clock starts once executing).
-  // `timedOut` distinguishes a timeout abort from a user cancel: both abort the
-  // same controller, but they settle to different outcomes (and exit codes).
-  let timedOut = false;
-  const workflowTimeoutMs = timeoutMsFromSec(resolveWorkflowTimeoutSec(spec, config));
-  const timeoutTimer =
-    workflowTimeoutMs > 0
-      ? setTimeout(() => {
-          timedOut = true;
-          ac.abort();
-        }, workflowTimeoutMs)
-      : undefined;
-  timeoutTimer?.unref?.();
-
-  const publisher = createLiveRunPublisher(store, runId);
-  const asOwnWork = ownWorkRewriter(options.priorOwner);
-  // Run notifications (bell / desktop / webhook) per the `notify` config —
-  // this process owns the run, so it is the one that pings.
-  const notifier = createNotifier(config.notify);
-  const notifyMeta = { workflow: name, runId };
-  let ok = false;
-  let budgetExceeded = false;
   try {
+    disposeSignals = options.installSignalHandlers(() => ac.abort());
+    disposeCancelWatch = watchRunCancel(store, runId, () => ac.abort());
+    // Mid-run steering: any attached UI (TUI /pause key, web button, `steamtrain
+    // workflow pause|resume|edit-step`) writes control files; this watcher
+    // applies them to the run.
+    const control = createWorkflowRunControl();
+    disposeControlWatch = watchRunControl(store, runId, control);
+
+    // Wait for a queue slot; runs beyond `maxParallelRuns` queue instead of
+    // colliding over the step cache and git worktrees.
+    let lastQueuePosition = -1;
+    const slot = await acquireRunSlot(store, runId, resolveMaxParallelRuns(config), {
+      signal: ac.signal,
+      onQueued: (position, running, limit) => {
+        if (position === lastQueuePosition) return;
+        lastQueuePosition = position;
+        err(
+          `queued: ${running}/${limit} run slots busy — position ${position}; waiting (cancel with Ctrl+C or 'steamtrain workflow cancel ${runId}')\n`,
+        );
+      },
+    });
+    if (!slot.ok) {
+      settled = true;
+      await store.update(runId, { status: "canceled", ok: false, endedAt: Date.now() });
+      const record = await saveHistory(historyStore, recorder, "canceled", err);
+      err("run canceled while queued\n");
+      return { code: exitCodeForOutcome("canceled"), outcome: "canceled", record };
+    }
+
+    const key = workflowCacheKey(name, input, cwd, spec, params);
+    let cache: Map<string, StepResult>;
+    if (options.fresh) {
+      await cacheStore.clear(key);
+      cache = new Map();
+    } else {
+      // Run on this very map, not a copy: saves track the engine's drops by it.
+      cache = await cacheStore.load(key);
+    }
+    if (options.seed && options.seed.size > 0) {
+      // Seed the already-succeeded steps and make them the resume baseline so an
+      // interrupted retry can pick up from here too.
+      for (const [stepId, result] of options.seed) cache.set(stepId, result);
+      await cacheStore.save(key, cache);
+    }
+
+    // Enforce whole-workflow wall-clock timeout (clock starts once executing).
+    // `timedOut` distinguishes a timeout abort from a user cancel: both abort the
+    // same controller, but they settle to different outcomes (and exit codes).
+    const workflowTimeoutMs = timeoutMsFromSec(resolveWorkflowTimeoutSec(spec, config));
+    timeoutTimer =
+      workflowTimeoutMs > 0
+        ? setTimeout(() => {
+            timedOut = true;
+            ac.abort();
+          }, workflowTimeoutMs)
+        : undefined;
+    timeoutTimer?.unref?.();
+
+    const livePublisher = createLiveRunPublisher(store, runId);
+    publisher = livePublisher;
+    const asOwnWork = ownWorkRewriter(options.priorOwner);
+    // Run notifications (bell / desktop / webhook) per the `notify` config —
+    // this process owns the run, so it is the one that pings.
+    const notifier = createNotifier(config.notify);
+    const notifyMeta = { workflow: name, runId };
+    let ok = false;
+    let budgetExceeded = false;
     for await (const replayed of orchestrator.runWorkflow(
       name,
       input,
@@ -1174,11 +1181,11 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<Drive
       control,
       options.humanInput,
       // A handed-off run keeps the start its first owner gave it.
-      { outputPaths: options.outputPaths, startedAt: options.priorOwner?.startedAt },
+      { outputPaths: options.outputPaths, startedAt: options.priorOwner?.startedAt, runId },
     )) {
       const event = asOwnWork(replayed);
       recorder.handle(event);
-      publisher.event(event);
+      livePublisher.event(event);
       notifyWorkflowEvent(notifier, notifyMeta, event);
       if (options.json) out(`${JSON.stringify(event)}\n`);
       else printHumanEvent(event, out, { canceled: ac.signal.aborted && !timedOut, timedOut });
@@ -1201,14 +1208,32 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<Drive
         : ok
           ? "done"
           : "error";
-    await publisher.finish(status, { ok: status === "done", timedOut });
+    await livePublisher.finish(status, { ok: status === "done", timedOut });
+    settled = true;
     const record = await saveHistory(historyStore, recorder, status, err, undefined, timedOut);
     const outcome = record ? classifyRun(record, { timedOut }) : "canceled";
     return { code: exitCodeForOutcome(outcome), outcome, record };
   } catch (runErr) {
     const status: RunRecordStatus = ac.signal.aborted ? "canceled" : "error";
     const error = status === "error" ? message(runErr) : undefined;
-    await publisher.finish(status, { ok: false, error, timedOut });
+    // Settling the live record is best-effort here: a failure must neither
+    // replace `runErr` nor skip the history record of the run that just ended.
+    try {
+      if (publisher) {
+        await publisher.finish(status, { ok: false, error, timedOut });
+      } else {
+        await store.update(runId, {
+          status,
+          ok: false,
+          error,
+          timedOut: timedOut || undefined,
+          endedAt: Date.now(),
+        });
+      }
+      settled = true;
+    } catch {
+      // `finally` below makes one more attempt to settle the meta.
+    }
     const record = await saveHistory(historyStore, recorder, status, err, error, timedOut);
     if (status === "canceled") {
       const outcome = record ? classifyRun(record, { timedOut }) : "canceled";
@@ -1216,10 +1241,22 @@ async function driveWorkflowRun(options: DriveWorkflowRunOptions): Promise<Drive
     }
     throw runErr;
   } finally {
+    ac.abort();
     if (timeoutTimer) clearTimeout(timeoutTimer);
     disposeSignals();
     disposeCancelWatch();
     disposeControlWatch();
+    if (!settled) {
+      await store
+        .update(runId, {
+          status: "error",
+          ok: false,
+          error: "run ended before it settled",
+          endedAt: Date.now(),
+        })
+        .catch(() => {});
+      publisher?.stop();
+    }
   }
 }
 

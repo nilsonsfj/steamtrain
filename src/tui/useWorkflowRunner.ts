@@ -441,6 +441,7 @@ export function useWorkflowRunner({
               onOutputsDeferred: (write) => {
                 deferredOutputs = write;
               },
+              runId,
             },
           )) {
             // Mid-run detach: once ownership transfer is committed, stop
@@ -474,6 +475,8 @@ export function useWorkflowRunner({
           runError = message(err);
           if (mountedRef.current) setWfNotice(`run failed: ${runError}`);
         } finally {
+          const wasAborted = ac.signal.aborted;
+          ac.abort();
           if (timeoutTimer) clearTimeout(timeoutTimer);
           approvalResolversRef.current.clear();
           humanInputResolversRef.current.clear();
@@ -489,7 +492,7 @@ export function useWorkflowRunner({
           // record now) and re-attach so the user keeps watching it live.
           const handoff = handoffRef.current;
           const handingOff = Boolean(
-            handoff && handoff.runId === runId && handoff.committed && ac.signal.aborted,
+            handoff && handoff.runId === runId && handoff.committed && wasAborted,
           );
           let handedOff = false;
           // Set when the hand-off failed: the run then ends here, as an error,
@@ -552,7 +555,7 @@ export function useWorkflowRunner({
           if (!handedOff) {
             const status = detachFailure
               ? "error"
-              : ac.signal.aborted
+              : wasAborted
                 ? "canceled"
                 : runError || !workflowOk
                   ? "error"

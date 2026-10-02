@@ -416,6 +416,13 @@ describe("lintTemplateRefs", () => {
       expect(lintTemplateRefs(s)).toEqual([]);
     });
 
+    it("does not warn unknown step for a json path that ends in a plain field name", () => {
+      const s = spec([
+        phase("p1", [worker("a"), worker("b", { prompt: "{{steps.a.json.output}}" })]),
+      ]);
+      expect(lintTemplateRefs(s)).toEqual([]);
+    });
+
     it("handles empty prompt", () => {
       const s = spec([phase("p1", [worker("a", { prompt: "" })])]);
       expect(lintTemplateRefs(s)).toEqual([]);

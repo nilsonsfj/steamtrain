@@ -72,6 +72,8 @@ describe("handoffRunToDetached", () => {
     });
     // Queue ordering is preserved; the previous owner's start time is cleared.
     expect(meta?.startedAt).toBeUndefined();
+    // pid:-1 grace is measured from this heartbeat, not the original createdAt.
+    expect(meta?.heartbeatAt).toBeGreaterThanOrEqual(meta?.createdAt ?? 0);
     expect(meta?.launch).toMatchObject({
       workflow: "bug-hunt",
       input: "audit the parser",

@@ -8,7 +8,7 @@ import { listProjects } from "./project-list";
 import { type QuitChoice, quitChoiceFor, quitPromptSpec } from "./quit-prompt";
 import { addRecent, labelRecents, pruneRecents, removeRecent } from "./recents";
 import { type FinishedRun, type RunWatch, startRunWatch } from "./run-watch";
-import { type ServerHandle, startServer } from "./server-child";
+import { type ServerHandle, engineUiUrl, startServer } from "./server-child";
 import { resolveShellPath } from "./shell-path";
 import { performQuit } from "./shutdown";
 import { type DesktopState, createStateStore, pruneLastWorkflow } from "./store";
@@ -168,7 +168,7 @@ function announce(finished: readonly FinishedRun[]): void {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
       // Same deep-link shape the engine's own notifications use.
-      void mainWindow.loadURL(`${new URL(server.ready.url).origin}/#run-${run.id}`);
+      void mainWindow.loadURL(engineUiUrl(server.ready, `#run-${run.id}`));
     });
     // Since Electron 42, macOS delivers these through UNNotification, which can
     // refuse an app without a real signature. Say so rather than drop it silently.
@@ -212,7 +212,7 @@ function restoreWindow(): void {
     return;
   }
   if (!server || !projectDir) return;
-  mainWindow = openWindow(new URL(server.ready.url).origin, projectDir);
+  mainWindow = openWindow(engineUiUrl(server.ready), projectDir);
 }
 
 /** Fork the engine for `cwd` and show its UI, replacing anything already open. */
@@ -236,16 +236,18 @@ async function openProject(cwd: string): Promise<void> {
   persist({ recents: addRecent(state.recents, cwd) });
 
   const origin = new URL(handle.ready.url).origin;
+  const ui = engineUiUrl(handle.ready);
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.setTitle(`steamtrain — ${basename(cwd)}`);
-    void mainWindow.loadURL(origin);
+    void mainWindow.loadURL(ui);
   } else {
-    mainWindow = openWindow(origin, cwd);
+    mainWindow = openWindow(ui, cwd);
   }
   refreshMenu();
 
   watch = startRunWatch({
     origin,
+    authToken: handle.ready.authToken,
     onActiveCount: showActivity,
     onFinished: announce,
   });

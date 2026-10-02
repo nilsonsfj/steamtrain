@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { childEnv } from "../util/child-env";
+import { killProcessGroup, waitForProcessGroupExit } from "../util/process-group";
 
 /**
  * Subprocess plumbing for `command` workflow steps: run one shell command,
@@ -66,27 +67,35 @@ export async function runShellCommand(
 
     // detached puts the command in its own process group so kills reach the
     // whole tree (`npm test` spawning node spawning workers), not just the shell.
-    const child = spawn(cmd, {
-      shell: true,
-      cwd: opts.cwd,
-      detached: process.platform !== "win32",
-      stdio: ["ignore", "pipe", "pipe"],
-      // Always build the env explicitly (rather than inheriting by omission) so
-      // ELECTRON_RUN_AS_NODE never reaches a user's command under the desktop
-      // app. `$STEAMTRAIN_CLI` re-adds it via `env ELECTRON_RUN_AS_NODE=1 …`.
-      env: childEnv(opts.env),
-    });
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(cmd, {
+        shell: true,
+        cwd: opts.cwd,
+        detached: process.platform !== "win32",
+        stdio: ["ignore", "pipe", "pipe"],
+        // Always build the env explicitly (rather than inheriting by omission) so
+        // ELECTRON_RUN_AS_NODE never reaches a user's command under the desktop
+        // app. `$STEAMTRAIN_CLI` re-adds it via `env ELECTRON_RUN_AS_NODE=1 …`.
+        env: childEnv(opts.env),
+      });
+    } catch (err) {
+      // Synchronous spawn failures (E2BIG, NUL in the command string) throw
+      // rather than emitting 'error'. Resolve so the executor never rejects.
+      resolve({
+        output: "",
+        truncated: false,
+        timedOut: false,
+        cancelled: false,
+        spawnError: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
 
+    const pgid = child.pid;
+    const killGraceMs = opts.killGraceMs ?? 5000;
     const killTree = (sig: NodeJS.Signals): void => {
-      try {
-        if (process.platform !== "win32" && typeof child.pid === "number") {
-          process.kill(-child.pid, sig);
-        } else {
-          child.kill(sig);
-        }
-      } catch {
-        // already gone
-      }
+      killProcessGroup(pgid, child, sig);
     };
 
     // Timeout and abort both terminate the same way: SIGTERM, then SIGKILL
@@ -95,8 +104,14 @@ export async function runShellCommand(
     let killTimer: NodeJS.Timeout | undefined;
     const terminate = (): void => {
       killTree("SIGTERM");
-      killTimer ??= setTimeout(() => killTree("SIGKILL"), opts.killGraceMs ?? 5000);
-      killTimer.unref();
+      killTimer ??= setTimeout(() => {
+        killTree("SIGKILL");
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        void finishAfterTreeExit(undefined);
+      }, killGraceMs);
+      // Stay referenced: an unref'd SIGKILL lets a headless CLI exit while a
+      // SIGTERM-immune grandchild is still mutating the worktree.
     };
 
     const timer =
@@ -127,12 +142,12 @@ export async function runShellCommand(
     child.stdout?.on("data", capture);
     child.stderr?.on("data", capture);
 
+    let closeTimer: NodeJS.Timeout | undefined;
     const finish = (exitCode: number | undefined): void => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
-      // Clear the pending SIGKILL escalation so it can't fire after the
-      // process already exited (PID/PGID-reuse window).
+      if (closeTimer) clearTimeout(closeTimer);
       if (killTimer) clearTimeout(killTimer);
       opts.signal?.removeEventListener("abort", onAbort);
       let output = Buffer.concat(chunks).toString("utf8");
@@ -147,10 +162,45 @@ export async function runShellCommand(
       resolve({ exitCode, output, truncated, timedOut, cancelled, spawnError });
     };
 
+    // Set when the shell exited but a background process still held the output
+    // pipes: the group is terminated and reaped before the step reports done.
+    let lingeringExit: { code: number | undefined } | undefined;
+    const finishAfterTreeExit = async (exitCode: number | undefined): Promise<void> => {
+      if (settled) return;
+      if (timedOut || cancelled || lingeringExit) {
+        await waitForProcessGroupExit(pgid, child, killGraceMs + 1000);
+      }
+      finish(lingeringExit && !timedOut && !cancelled ? lingeringExit.code : exitCode);
+    };
+
     child.on("error", (err) => {
       spawnError = err instanceof Error ? err.message : String(err);
       finish(undefined);
     });
-    child.on("close", (code) => finish(code ?? undefined));
+    // Contract: the step ends with the shell. A background process that still
+    // holds the output pipes is terminated (below); one that redirected its own
+    // stdio (`cmd >/dev/null 2>&1 &`, `nohup …`) is a deliberate daemon and is
+    // left running, since the pipes give no signal that it is unwanted.
+    child.on("exit", (code) => {
+      // A backgrounded grandchild can keep stdout/stderr open after the shell
+      // exits, so 'close' never fires. Wait briefly, then terminate the group
+      // (SIGTERM, then SIGKILL after the grace) and report only once it is
+      // gone: resolving earlier would let workspace cleanup and dependent steps
+      // race a writer that is still running. Skipped while a timeout/cancel
+      // kill is already escalating.
+      closeTimer = setTimeout(() => {
+        if (timedOut || cancelled || settled) return;
+        lingeringExit = { code: code ?? undefined };
+        terminate();
+      }, 250);
+      closeTimer.unref();
+    });
+    child.on("close", (code) => {
+      if (timedOut || cancelled || lingeringExit) {
+        void finishAfterTreeExit(code ?? undefined);
+        return;
+      }
+      finish(code ?? undefined);
+    });
   });
 }

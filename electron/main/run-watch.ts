@@ -11,8 +11,9 @@
  * poll a few seconds apart is enough for a dock badge and a notification about
  * work that takes minutes, and it has no reconnect story to get wrong.
  *
- * The engine binds loopback with no token, so these requests need no auth. If
- * that ever changes, this is the code that breaks.
+ * The engine now generates a per-launch token even on loopback. When
+ * {@link StartRunWatchOptions.authToken} is set, we mint a session cookie
+ * via POST /api/auth and send it on every poll and cancel.
  */
 
 /** How often to ask. Slow enough to be free, fast enough for a dock badge. */
@@ -97,6 +98,8 @@ export interface RunWatch {
 export interface StartRunWatchOptions extends RunWatchEvents {
   /** Engine origin, e.g. `http://127.0.0.1:53412`. */
   origin: string;
+  /** Launch auth token; when set, polls log in and send the session cookie. */
+  authToken?: string;
   /** Injected for tests. */
   fetchRuns?: (origin: string) => Promise<RunSummary[]>;
   /** Injected for tests. */
@@ -106,19 +109,52 @@ export interface StartRunWatchOptions extends RunWatchEvents {
   deadlineMs?: number;
 }
 
-async function defaultFetchRuns(origin: string): Promise<RunSummary[]> {
-  const res = await fetch(`${origin}/api/runs`, { signal: AbortSignal.timeout(REQUEST_MS) });
+async function sessionCookie(origin: string, token: string): Promise<string | undefined> {
+  const res = await fetch(`${origin}/api/auth`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token }),
+    signal: AbortSignal.timeout(REQUEST_MS),
+  });
+  if (!res.ok) return undefined;
+  const raw = res.headers.get("set-cookie");
+  return raw?.split(";")[0] || undefined;
+}
+
+function authHeaders(origin: string, cookie?: string, mutating = false): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (cookie) headers.cookie = cookie;
+  if (mutating) headers.origin = origin;
+  return headers;
+}
+
+async function defaultFetchRuns(origin: string, cookie?: string): Promise<RunSummary[]> {
+  const res = await fetch(`${origin}/api/runs`, {
+    signal: AbortSignal.timeout(REQUEST_MS),
+    headers: authHeaders(origin, cookie),
+  });
+  if (res.status === 401) {
+    const err = new Error("GET /api/runs -> 401") as Error & { unauthorized?: boolean };
+    err.unauthorized = true;
+    throw err;
+  }
   if (!res.ok) throw new Error(`GET /api/runs -> ${res.status}`);
   const body: unknown = await res.json();
   const runs = (body as { runs?: unknown }).runs;
   return Array.isArray(runs) ? (runs as RunSummary[]) : [];
 }
 
-async function defaultCancelRun(origin: string, id: string): Promise<void> {
-  await fetch(`${origin}/api/runs/${encodeURIComponent(id)}/cancel`, {
+async function defaultCancelRun(origin: string, id: string, cookie?: string): Promise<void> {
+  const res = await fetch(`${origin}/api/runs/${encodeURIComponent(id)}/cancel`, {
     method: "POST",
     signal: AbortSignal.timeout(REQUEST_MS),
+    headers: authHeaders(origin, cookie, true),
   });
+  if (res.status === 401) {
+    const err = new Error("POST /api/runs/cancel -> 401") as Error & { unauthorized?: boolean };
+    err.unauthorized = true;
+    throw err;
+  }
 }
 
 /**
@@ -141,13 +177,36 @@ function within<T>(promise: Promise<T>, ms: number, fallback: () => T): Promise<
 export function startRunWatch(options: StartRunWatchOptions): RunWatch {
   const {
     origin,
-    fetchRuns = defaultFetchRuns,
-    cancelRun = defaultCancelRun,
+    authToken,
     intervalMs = POLL_MS,
     deadlineMs = QUIT_DEADLINE_MS,
     onActiveCount,
     onFinished,
   } = options;
+
+  let cookie: string | undefined;
+  const cookieFor = async (): Promise<string | undefined> => {
+    if (!authToken) return undefined;
+    if (cookie) return cookie;
+    cookie = await sessionCookie(origin, authToken);
+    return cookie;
+  };
+  const isUnauthorized = (err: unknown): boolean =>
+    Boolean(err && typeof err === "object" && (err as { unauthorized?: boolean }).unauthorized);
+  const withAuthRetry = async <T>(op: (cookie?: string) => Promise<T>): Promise<T> => {
+    try {
+      return await op(await cookieFor());
+    } catch (err) {
+      if (!authToken || !isUnauthorized(err)) throw err;
+      cookie = undefined;
+      return op(await cookieFor());
+    }
+  };
+  const fetchRuns =
+    options.fetchRuns ?? ((url: string) => withAuthRetry((c) => defaultFetchRuns(url, c)));
+  const cancelRun =
+    options.cancelRun ??
+    ((url: string, id: string) => withAuthRetry((c) => defaultCancelRun(url, id, c)));
 
   let snapshot: RunSummary[] = [];
   let active = 0;

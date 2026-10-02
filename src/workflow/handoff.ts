@@ -147,6 +147,7 @@ export async function handoffRunToDetached(
   // Re-arm the registry entry for a detached owner: back to the queue (so the
   // child acquires a run slot cleanly), owner-less until the child reports its
   // pid, and stripped of the previous owner's transient state.
+  const handedOffAt = Date.now();
   await store.update(runId, {
     source: "cli-detached",
     detached: true,
@@ -156,8 +157,11 @@ export async function handoffRunToDetached(
     pendingApprovals: [],
     pendingInputs: [],
     // Re-timed when the child leaves the queue; createdAt is preserved so the
-    // run keeps its place in the cross-process queue ordering.
+    // run keeps its place in the cross-process queue ordering. heartbeatAt is
+    // the pid:-1 grace origin so a long-running run is not swept as dead
+    // before the child records its pid.
     startedAt: undefined,
+    heartbeatAt: handedOffAt,
     launch: options.launch,
   });
 
@@ -189,7 +193,7 @@ export interface CompleteHandoffOptions extends HandoffRunOptions {
    * `event`/`flush` methods are used — the terminal `finish` is deliberately
    * skipped because the detached child owns the run's record from here on.
    */
-  publisher?: Pick<LiveRunPublisher, "event" | "flush">;
+  publisher?: Pick<LiveRunPublisher, "event" | "flush" | "stop">;
 }
 
 /**
@@ -207,5 +211,6 @@ export async function completeHandoff(
 ): Promise<SpawnDetachedRunnerResult> {
   const { publisher, ...handoff } = options;
   await publisher?.flush().catch(() => {});
+  publisher?.stop();
   return handoffRunToDetached(handoff);
 }

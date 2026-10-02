@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, stat, unlink, writeFile } from "node:fs/promises";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -198,6 +198,103 @@ describe("migrateStateVersion", () => {
 });
 
 describe("withFileLock bestEffort", () => {
+  it("steals a lock whose holder pid is dead", async () => {
+    const dir = await scratchDir();
+    const lockPath = join(dir, "x.lock");
+    await writeFile(lockPath, JSON.stringify({ pid: 2 ** 30, host: hostname(), createdAtMs: 0 }));
+    const outcome = await withFileLock(lockPath, async (locked) => locked, {
+      maxWaitMs: 1000,
+      pollMs: 5,
+      label: "test lock",
+    });
+    expect(outcome).toEqual({ value: true, locked: true });
+  });
+
+  it("serializes concurrent stealers of a dead lock", async () => {
+    const dir = await scratchDir();
+    const lockPath = join(dir, "x.lock");
+    await writeFile(lockPath, JSON.stringify({ pid: 2 ** 30, host: hostname(), createdAtMs: 0 }));
+    let active = 0;
+    let maxActive = 0;
+    const run = async (tag: string): Promise<string> =>
+      (
+        await withFileLock(
+          lockPath,
+          async () => {
+            active += 1;
+            maxActive = Math.max(maxActive, active);
+            await new Promise((r) => setTimeout(r, 30));
+            active -= 1;
+            return tag;
+          },
+          { maxWaitMs: 5_000, pollMs: 5, label: "test lock" },
+        )
+      ).value;
+    const tags = await Promise.all([run("a"), run("b"), run("c")]);
+    expect(tags.sort()).toEqual(["a", "b", "c"]);
+    expect(maxActive).toBe(1);
+  });
+
+  it("releases the lock after a held steal coordinator is freed", async () => {
+    const dir = await scratchDir();
+    const lockPath = join(dir, "x.lock");
+    const stealPath = `${lockPath}.steal`;
+    let releaseFn!: () => void;
+    const holdUntil = new Promise<void>((resolve) => {
+      releaseFn = resolve;
+    });
+    let markAcquired!: () => void;
+    const acquired = new Promise<void>((resolve) => {
+      markAcquired = resolve;
+    });
+    const held = withFileLock(
+      lockPath,
+      async () => {
+        markAcquired();
+        await holdUntil;
+      },
+      { maxWaitMs: 5_000, pollMs: 5, label: "test lock" },
+    );
+    await acquired;
+    await writeFile(
+      stealPath,
+      JSON.stringify({ pid: process.pid, host: hostname(), createdAtMs: Date.now() }),
+    );
+    releaseFn();
+    await new Promise((r) => setTimeout(r, 80));
+    await unlink(stealPath);
+    await held;
+    await expect(stat(lockPath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("serializes acquire when an abandoned steal coordinator is present", async () => {
+    const dir = await scratchDir();
+    const lockPath = join(dir, "x.lock");
+    await writeFile(
+      `${lockPath}.steal`,
+      JSON.stringify({ pid: 2 ** 30, host: hostname(), createdAtMs: 0 }),
+    );
+    let active = 0;
+    let maxActive = 0;
+    const run = async (tag: string): Promise<string> =>
+      (
+        await withFileLock(
+          lockPath,
+          async () => {
+            active += 1;
+            maxActive = Math.max(maxActive, active);
+            await new Promise((r) => setTimeout(r, 30));
+            active -= 1;
+            return tag;
+          },
+          { maxWaitMs: 5_000, pollMs: 5, label: "test lock" },
+        )
+      ).value;
+    const tags = await Promise.all([run("a"), run("b"), run("c")]);
+    expect(tags.sort()).toEqual(["a", "b", "c"]);
+    expect(maxActive).toBe(1);
+  });
+
   it("runs unlocked when bestEffort and the holder never releases", async () => {
     const dir = await scratchDir();
     const lockPath = join(dir, "x.lock");

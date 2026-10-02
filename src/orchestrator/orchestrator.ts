@@ -61,6 +61,8 @@ export interface RunWorkflowOptions {
   startedAt?: number;
   /** See {@link WorkflowRunContext.onOutputsDeferred}: for a host that can hand a run off. */
   onOutputsDeferred?: (write: () => Promise<WorkflowOutputResult[]>) => void;
+  /** Live-run id; worktrees are named under this so a crash can reclaim them. */
+  runId?: string;
 }
 
 /**
@@ -372,11 +374,11 @@ export class Orchestrator {
     humanInput?: HumanInputProvider,
     options: RunWorkflowOptions = {},
   ): AsyncIterable<WorkflowEvent> {
-    const { maxConcurrency, outputPaths, startedAt, onOutputsDeferred } = options;
+    const { maxConcurrency, outputPaths, startedAt, onOutputsDeferred, runId } = options;
     const spec = specOverride ?? this.listWorkflows()[name];
     if (!spec) throw new Error(`unknown workflow '${name}'`);
 
-    const agentWorkspace = createGitWorktreeManager();
+    const agentWorkspace = createGitWorktreeManager({ runId });
     const events = runWorkflow(
       spec,
       { input, cache, inputs, outputPaths, startedAt, onOutputsDeferred },

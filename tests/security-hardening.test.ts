@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { isAllowedApiBaseUrl } from "../src/config/validate";
 import { redactSecrets } from "../src/util/redact";
@@ -25,7 +26,7 @@ describe("shellQuote / renderCmd", () => {
       input: "hi; curl evil.test",
       outputs: new Map(),
     });
-    expect(cmd).toBe("echo 'hi; curl evil.test'");
+    expect(execFileSync("sh", ["-c", cmd], { encoding: "utf8" })).toBe("hi; curl evil.test\n");
   });
 
   it("leaves values raw when allowShellTemplates is set", () => {
@@ -35,6 +36,162 @@ describe("shellQuote / renderCmd", () => {
       { allowShellTemplates: true },
     );
     expect(cmd).toBe("npm test");
+  });
+
+  it("escapes a value sitting inside double quotes instead of wrapping it", () => {
+    const cmd = renderCmd(
+      'echo "{{input}}"',
+      { input: 'x"; printf INJECTED; printf "', outputs: new Map() },
+      { platform: "linux" },
+    );
+    expect(execFileSync("sh", ["-c", cmd], { encoding: "utf8" })).toBe(
+      'x"; printf INJECTED; printf "\n',
+    );
+  });
+
+  it("escapes a value sitting inside single quotes", () => {
+    const cmd = renderCmd(
+      "echo '{{input}}'",
+      { input: "it's", outputs: new Map() },
+      { platform: "linux" },
+    );
+    expect(execFileSync("sh", ["-c", cmd], { encoding: "utf8" })).toBe("it's\n");
+  });
+
+  it("does not treat a backslash-escaped quote as opening a quoted string", () => {
+    const cmd = renderCmd(
+      'printf %s \\"{{input}}\\"',
+      { input: "x; printf INJECTED", outputs: new Map() },
+      { platform: "linux" },
+    );
+    const out = execFileSync("sh", ["-c", cmd], { encoding: "utf8" });
+    // Injection runs a second printf and concatenates to `"xINJECTED"`.
+    expect(out).toBe('"x; printf INJECTED"');
+  });
+
+  it("quotes placeholders inside $(...) for the inner quoting context", () => {
+    const cmd = renderCmd(
+      "printf %s \"$(printf '{{input}}')\"",
+      { input: "x'; printf INJECTED; printf '", outputs: new Map() },
+      { platform: "linux" },
+    );
+    const out = execFileSync("sh", ["-c", cmd], { encoding: "utf8" });
+    expect(out).toBe("x'; printf INJECTED; printf '");
+  });
+
+  it("preserves newlines inside double quotes", () => {
+    const cmd = renderCmd(
+      'printf %s "{{input}}"',
+      { input: "a\nb", outputs: new Map() },
+      { platform: "linux" },
+    );
+    expect(execFileSync("sh", ["-c", cmd], { encoding: "utf8" })).toBe("a\nb");
+  });
+
+  it("does not treat a quote inside a shell comment as opening a quoted string", () => {
+    if (process.platform === "win32") return;
+    const cmd = renderCmd(
+      "# ' ignored by sh\nprintf %s {{input}}",
+      { input: "x; printf INJECTED", outputs: new Map() },
+      { platform: "linux" },
+    );
+    const out = execFileSync("sh", ["-c", cmd], { encoding: "utf8" });
+    expect(out).toBe("x; printf INJECTED");
+  });
+
+  it("does not execute later lines of a multiline value interpolated in a comment", () => {
+    if (process.platform === "win32") return;
+    const cmd = renderCmd(
+      "# {{input}}\nprintf SAFE",
+      { input: "x\nprintf INJECTED\n#", outputs: new Map() },
+      { platform: "linux" },
+    );
+    const out = execFileSync("sh", ["-c", cmd], { encoding: "utf8" });
+    expect(out).toBe("SAFE");
+  });
+
+  it("does not treat an escaped space before # as starting a comment", () => {
+    if (process.platform === "win32") return;
+    const cmd = renderCmd(
+      "printf %s foo\\ # ' text\n'; printf %s {{input}}",
+      { input: "x; printf INJECTED", outputs: new Map() },
+      { platform: "linux" },
+    );
+    const out = execFileSync("sh", ["-c", cmd], { encoding: "utf8" });
+    expect(out).toBe("foo # text\nx; printf INJECTED");
+  });
+
+  it("does not treat ${#parameter} as starting a shell comment", () => {
+    if (process.platform === "win32") return;
+    const cmd = renderCmd(
+      'printf %s ${#} "{{input}}"',
+      { input: 'x"; printf INJECTED; echo "', outputs: new Map() },
+      { platform: "linux" },
+    );
+    const out = execFileSync("sh", ["-c", cmd], { encoding: "utf8" });
+    expect(out).toBe('0x"; printf INJECTED; echo "');
+  });
+
+  it("does not let a here-document body close early via interpolated input", () => {
+    if (process.platform === "win32") return;
+    const cmd = renderCmd(
+      "cat <<END\n{{input}}\nEND",
+      { input: "x\nEND\nprintf INJECTED\n#", outputs: new Map() },
+      { platform: "linux" },
+    );
+    const out = execFileSync("sh", ["-c", cmd], { encoding: "utf8" });
+    expect(out).toBe("x\nEND\nprintf INJECTED\n#\n");
+  });
+
+  it("does not let template text before a placeholder complete a here-document delimiter", () => {
+    if (process.platform === "win32") return;
+    const cmd = renderCmd(
+      "cat <<END\nE{{input}}\nEND",
+      { input: "ND\nprintf INJECTED\n#", outputs: new Map() },
+      { platform: "linux" },
+    );
+    const out = execFileSync("sh", ["-c", cmd], { encoding: "utf8" });
+    expect(out).toBe("END\nprintf INJECTED\n#\n");
+  });
+
+  it("does not let template text after a placeholder complete a here-document delimiter", () => {
+    if (process.platform === "win32") return;
+    const cmd = renderCmd(
+      "cat <<END\n{{input}}D\nprintf INJECTED\nEND",
+      { input: "EN", outputs: new Map() },
+      { platform: "linux" },
+    );
+    const out = execFileSync("sh", ["-c", cmd], { encoding: "utf8" });
+    expect(out).toBe("END\nprintf INJECTED\n");
+  });
+
+  it("preserves dollar signs, backticks, and backslashes in unquoted here-documents", () => {
+    if (process.platform === "win32") return;
+    const run = (input: string): string => {
+      const cmd = renderCmd(
+        "cat <<END\n{{input}}\nEND",
+        { input, outputs: new Map() },
+        { platform: "linux" },
+      );
+      return execFileSync("sh", ["-c", cmd], { encoding: "utf8" });
+    };
+    expect(run("price $5")).toBe("price $5\n");
+    expect(run("a`b")).toBe("a`b\n");
+    expect(run("a\\b")).toBe("a\\b\n");
+  });
+
+  it("keeps unquoted here-document expansions on other body lines", () => {
+    if (process.platform === "win32") return;
+    const cmd = renderCmd(
+      "cat <<END\n$HOME\n{{input}}\nEND",
+      { input: "hello", outputs: new Map() },
+      { platform: "linux" },
+    );
+    const out = execFileSync("sh", ["-c", cmd], {
+      encoding: "utf8",
+      env: { ...process.env, HOME: "/tmp/st-home" },
+    });
+    expect(out).toBe("/tmp/st-home\nhello\n");
   });
 });
 

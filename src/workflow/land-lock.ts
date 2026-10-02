@@ -37,7 +37,7 @@ import { runGitText } from "./worktree";
 export interface LandLockOptions {
   /** Give up acquiring after this long and run `fn` anyway. Default 10 min. */
   maxWaitMs?: number;
-  /** A held lock older than this (by mtime) is treated as abandoned. Default 15 min. */
+  /** Heartbeat cadence basis. Age alone never permits reclaiming an owner. Default 15 min. */
   staleMs?: number;
   /** Poll interval while another process holds the lock. Default 750ms. */
   pollMs?: number;

@@ -109,4 +109,26 @@ describe("runAgentProcess capacity abort", () => {
     const events = await consumer;
     expect(events.some((e) => e.kind === "error")).toBe(true);
   });
+
+  it("fails when the child is killed by a signal even if it already printed output", async () => {
+    const gen = runAgentProcess({
+      id: "opencode",
+      binary: "node",
+      args: [
+        "-e",
+        "process.stdout.write('{\"ok\":true}\\n'); process.kill(process.pid, 'SIGTERM');",
+      ],
+      opts: { prompt: "hi", model: "x", idleTimeoutMs: 0 },
+      map: () => [{ kind: "session_start", agent: "opencode", ts: Date.now() }],
+    });
+    const events = await drain(gen);
+    const err = events.find((e) => e.kind === "error");
+    expect(err).toEqual(
+      expect.objectContaining({
+        kind: "error",
+        message: expect.stringMatching(/killed by SIGTERM|exited with code null/),
+      }),
+    );
+    expect(events.some((e) => e.kind === "session_start")).toBe(true);
+  });
 });

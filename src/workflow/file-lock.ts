@@ -1,4 +1,5 @@
-import { mkdir, readFile, stat, unlink, utimes, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { type FileHandle, link, mkdir, open, unlink, utimes, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { dirname } from "node:path";
 import { isEnoent } from "./fs-util";
@@ -8,17 +9,19 @@ import { abortableSleep } from "./timeout";
  * Cross-process exclusive file lock shared by the land lock (PR merges) and
  * the project state lock (`.steamtrain/` writers + worktree add).
  *
- * Acquisition is exclusive-create (`wx`) of a JSON payload `{ pid, host,
- * createdAtMs }`. Holders refresh mtime so long critical sections are not
- * mistaken for abandoned locks; dead same-host PIDs and stale mtimes are
- * stealable. Release is ownership-checked so a contender that stole never
- * deletes a newer holder's file.
+ * Payloads are fully written before an exclusive hard-link publishes them.
+ * All main-lock mutations take the sibling coordinator. Recovery is allowed
+ * only for a provably dead same-host owner, never just an expired heartbeat.
+ * Each coordinator incarnation has an immutable chain of recovery claims;
+ * a dead claimant can be succeeded without deleting a claim another process
+ * may have acquired. Recovery claims are retained to prevent delayed readers
+ * from reopening an old generation.
  */
 
 export interface FileLockOptions {
   /** Give up acquiring after this long. Default 10 min. */
   maxWaitMs?: number;
-  /** A held lock older than this (by mtime) is treated as abandoned. Default 15 min. */
+  /** Heartbeat cadence basis. Age alone never permits reclaiming an owner. Default 15 min. */
   staleMs?: number;
   /** Poll interval while another process holds the lock. Default 750ms. */
   pollMs?: number;
@@ -44,11 +47,13 @@ interface LockPayload {
   pid: number;
   host: string;
   createdAtMs: number;
+  token?: string;
 }
 
 const DEFAULT_MAX_WAIT_MS = 10 * 60_000;
 const DEFAULT_STALE_MS = 15 * 60_000;
 const DEFAULT_POLL_MS = 750;
+const STEAL_LOCK_ACQUIRE_ATTEMPTS = 8;
 
 /**
  * Run `fn` while holding an exclusive lock at `lockPath`. See
@@ -72,16 +77,14 @@ export async function withFileLock<T>(
   const deadline = now() + maxWaitMs;
   let contendedNotice = false;
   let held = false;
+  const payload = newPayload(now());
 
   while (!held) {
     if (opts.signal?.aborted) throw new Error("cancelled");
-    const acquired = await tryAcquire(lockPath, now());
+    const acquired = await tryAcquire(lockPath, payload);
     if (acquired) {
       held = true;
       break;
-    }
-    if (await stealIfStale(lockPath, staleMs, now())) {
-      continue;
     }
     if (now() >= deadline) {
       const waited = Math.round(maxWaitMs / 1000);
@@ -108,84 +111,179 @@ export async function withFileLock<T>(
   if (typeof heartbeat.unref === "function") heartbeat.unref();
 
   try {
-    return { value: await fn(true), locked: true };
+    const value = await withCleanup(
+      () => fn(true),
+      () => releaseIfOwned(lockPath, payload.token!),
+    );
+    return { value, locked: true };
   } finally {
     clearInterval(heartbeat);
-    await releaseIfOwned(lockPath);
   }
 }
 
-async function tryAcquire(lockPath: string, nowMs: number): Promise<boolean> {
+/**
+ * Run `fn`, then `cleanup`. A cleanup failure is thrown (fail loud) but keeps
+ * `fn`'s own error as its `cause` instead of silently replacing it.
+ */
+async function withCleanup<T>(fn: () => Promise<T>, cleanup: () => Promise<void>): Promise<T> {
+  let value: T | undefined;
+  let failed = false;
+  let error: unknown;
   try {
-    const payload: LockPayload = { pid: process.pid, host: hostname(), createdAtMs: nowMs };
-    await writeFile(lockPath, JSON.stringify(payload), { flag: "wx" });
+    value = await fn();
+  } catch (err) {
+    failed = true;
+    error = err;
+  }
+  try {
+    await cleanup();
+  } catch (cleanupErr) {
+    if (failed && cleanupErr instanceof Error && cleanupErr.cause === undefined) {
+      cleanupErr.cause = error;
+    }
+    throw cleanupErr;
+  }
+  if (failed) throw error;
+  return value as T;
+}
+
+interface LockSnapshot {
+  holder: LockPayload;
+  ino: number;
+  dev: number;
+  raw: string;
+}
+
+function newPayload(nowMs = Date.now()): LockPayload {
+  return { pid: process.pid, host: hostname(), createdAtMs: nowMs, token: randomUUID() };
+}
+
+function holderIsDead(holder: LockPayload): boolean {
+  if (holder.host !== hostname()) return false;
+  try {
+    process.kill(holder.pid, 0);
+    return false;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "ESRCH";
+  }
+}
+
+async function publishPayload(path: string, payload: LockPayload): Promise<boolean> {
+  const temp = `${path}.owner.${randomUUID()}`;
+  try {
+    await writeFile(temp, JSON.stringify(payload), { flag: "wx", mode: 0o600 });
+    await link(temp, path);
     return true;
   } catch (err) {
     if (isEnoent(err)) {
-      await mkdir(dirname(lockPath), { recursive: true });
+      await mkdir(dirname(path), { recursive: true });
       return false;
     }
     if (isEexist(err)) return false;
     throw err;
+  } finally {
+    await unlink(temp).catch(() => {});
   }
 }
 
-async function stealIfStale(lockPath: string, staleMs: number, nowMs: number): Promise<boolean> {
-  let info: { mtimeMs: number } | undefined;
-  try {
-    const s = await stat(lockPath);
-    info = { mtimeMs: s.mtimeMs };
-  } catch (err) {
-    return isEnoent(err);
-  }
-
-  const holder = await readHolder(lockPath);
-  if (holder && holder.host === hostname() && !isProcessAlive(holder.pid)) {
-    return removeQuietly(lockPath);
-  }
-  if (nowMs - info.mtimeMs > staleMs) {
-    return removeQuietly(lockPath);
-  }
-  return false;
+async function tryAcquire(lockPath: string, payload: LockPayload): Promise<boolean> {
+  return (
+    (await withStealLock(lockPath, async () => {
+      if (await publishPayload(lockPath, payload)) return true;
+      const existing = await readLock(lockPath);
+      if (!existing || !holderIsDead(existing.holder)) return false;
+      await unlink(lockPath);
+      return publishPayload(lockPath, payload);
+    })) === true
+  );
 }
 
-async function releaseIfOwned(lockPath: string): Promise<void> {
-  const holder = await readHolder(lockPath);
-  if (holder && holder.pid === process.pid && holder.host === hostname()) {
-    await removeQuietly(lockPath);
-  }
-}
-
-async function readHolder(lockPath: string): Promise<LockPayload | undefined> {
-  try {
-    const raw = await readFile(lockPath, "utf8");
-    const parsed = JSON.parse(raw) as Partial<LockPayload>;
-    if (typeof parsed.pid === "number" && typeof parsed.host === "string") {
-      return { pid: parsed.pid, host: parsed.host, createdAtMs: Number(parsed.createdAtMs) || 0 };
+async function withStealLock<T>(
+  lockPath: string,
+  fn: () => Promise<T>,
+  attempts = STEAL_LOCK_ACQUIRE_ATTEMPTS,
+): Promise<T | undefined> {
+  const stealPath = `${lockPath}.steal`;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const payload = newPayload();
+    if (await tryAcquireStealLock(stealPath, payload)) {
+      return withCleanup(fn, () => removeIfOwned(stealPath, payload.token!));
     }
-  } catch {
-    // Corrupt/empty/partial lock file — let staleness reclaim it.
+    await abortableSleep(5);
   }
   return undefined;
 }
 
-function isProcessAlive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === "EPERM";
-  }
+async function tryAcquireStealLock(stealPath: string, payload: LockPayload): Promise<boolean> {
+  if (await publishPayload(stealPath, payload)) return true;
+  if (!(await reclaimAbandonedStealLock(stealPath))) return false;
+  return publishPayload(stealPath, payload);
 }
 
-async function removeQuietly(lockPath: string): Promise<boolean> {
-  try {
-    await unlink(lockPath);
-  } catch {
-    // Someone else removed/replaced it — fine.
+async function reclaimAbandonedStealLock(stealPath: string): Promise<boolean> {
+  const observed = await readLock(stealPath);
+  if (!observed || !holderIsDead(observed.holder)) return false;
+  const identity = createHash("sha256")
+    .update(`${observed.dev}:${observed.ino}:${observed.raw}`)
+    .digest("hex");
+  for (let generation = 0; ; generation++) {
+    const claimPath = `${stealPath}.claim.${identity}.${generation}`;
+    if (await publishPayload(claimPath, newPayload())) break;
+    const claim = await readLock(claimPath);
+    if (!claim || !holderIsDead(claim.holder)) return false;
   }
+  const current = await readLock(stealPath);
+  if (!current) return false;
+  if (
+    current.ino !== observed.ino ||
+    current.dev !== observed.dev ||
+    current.raw !== observed.raw
+  ) {
+    return false;
+  }
+  await unlink(stealPath);
   return true;
+}
+
+async function releaseIfOwned(lockPath: string, token: string): Promise<void> {
+  await withStealLock(lockPath, () => removeIfOwned(lockPath, token), Number.POSITIVE_INFINITY);
+}
+
+async function removeIfOwned(path: string, token: string): Promise<void> {
+  const existing = await readLock(path);
+  if (!existing || existing.holder.token !== token) {
+    throw new Error(`lock ownership lost: ${path}`);
+  }
+  await unlink(path);
+}
+
+async function readLock(path: string): Promise<LockSnapshot | undefined> {
+  let handle: FileHandle | undefined;
+  try {
+    handle = await open(path, "r");
+    const raw = await handle.readFile("utf8");
+    const info = await handle.stat();
+    let parsed: Partial<LockPayload>;
+    try {
+      parsed = JSON.parse(raw) as Partial<LockPayload>;
+    } catch {
+      return undefined;
+    }
+    if (
+      !parsed ||
+      !Number.isInteger(parsed.pid) ||
+      Number(parsed.pid) <= 0 ||
+      typeof parsed.host !== "string"
+    ) {
+      return undefined;
+    }
+    return { holder: parsed as LockPayload, ino: info.ino, dev: info.dev, raw };
+  } catch (err) {
+    if (isEnoent(err)) return undefined;
+    throw err;
+  } finally {
+    await handle?.close();
+  }
 }
 
 function isEexist(err: unknown): boolean {

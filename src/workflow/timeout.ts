@@ -9,9 +9,17 @@ import {
 /** Default per-agent subprocess wall-clock limit: 15 minutes (in seconds). */
 export const DEFAULT_STEP_TIMEOUT_SEC = 15 * 60;
 
+/**
+ * setTimeout / spawn kill timers wrap delays above 2³¹−1 ms to a tiny value.
+ * Clamp so a very large (or overflowed) timeout cannot fire almost immediately.
+ */
+export const MAX_TIMEOUT_MS = 2_147_483_647;
+
 /** Convert a second-based timeout to milliseconds for timers and subprocess kills. */
 export function timeoutMsFromSec(sec: number): number {
-  return Math.round(sec * 1000);
+  if (Number.isNaN(sec) || sec <= 0) return 0;
+  if (!Number.isFinite(sec)) return MAX_TIMEOUT_MS;
+  return Math.min(MAX_TIMEOUT_MS, Math.round(sec * 1000));
 }
 
 /**

@@ -216,6 +216,25 @@ describe("worktree merge-back core", () => {
     expect(show).toBe("on a branch");
   });
 
+  it("does not force-reset or delete a branch the user already named", async () => {
+    const { repo, allocate } = await repoWithManager();
+    await git(repo, "branch", "user-named");
+    const original = (await git(repo, "rev-parse", "user-named")).trim();
+    const source = await allocate("feature");
+    await writeFile(join(source.root, "src", "a.txt"), "must not land here\n");
+
+    await expect(
+      harvestWorktrees({
+        repoRoot: repo,
+        sources: [source],
+        mode: "branch",
+        branchName: "user-named",
+      }),
+    ).rejects.toThrow();
+    expect((await git(repo, "rev-parse", "user-named")).trim()).toBe(original);
+    expect(await git(repo, "branch", "--list", "user-named")).toContain("user-named");
+  });
+
   it("refuses to apply over conflicting local edits, leaving the workspace intact", async () => {
     const { repo, allocate } = await repoWithManager();
     const source = await allocate("impl");

@@ -171,6 +171,24 @@ describe("command workflow step", () => {
     expect(output).not.toMatch(/^hi\nINJECTED$/m);
   });
 
+  it("fails the step, not the run, when the cmd template cannot be rendered", async () => {
+    const cwd = await tempDir();
+    const events = await runToEvents(
+      spec([
+        {
+          id: "p",
+          title: "P",
+          steps: [{ id: "bad", kind: "command", cmd: 'printf %s "$(({{input}}))"' }],
+        },
+      ]),
+      agentlessDeps(cwd),
+    );
+    const bad = doneResults(events).get("bad");
+    expect(bad?.ok).toBe(false);
+    expect(bad?.error).toMatch(/arithmetic/);
+    expect(workflowOk(events)).toBe(false);
+  });
+
   it("allowShellTemplates runs the interpolated string as raw shell", async () => {
     const cwd = await tempDir();
     const events: WorkflowEvent[] = [];
@@ -676,6 +694,20 @@ describe("runShellCommand", () => {
     expect(Date.now() - started).toBeLessThan(10000);
   }, 15000);
 
+  it("terminates a background writer still holding the pipes before reporting done", async () => {
+    const cwd = await tempDir();
+    const marker = join(cwd, "late.txt");
+    const result = await runShellCommand(
+      // The shell exits at once; the background node keeps stdout/stderr open
+      // and would write the marker a second later if left alone.
+      `node -e "setTimeout(() => require('fs').writeFileSync('${marker}', 'late'), 1000)" & exit 0`,
+      { cwd, killGraceMs: 300 },
+    );
+    expect(result.exitCode).toBe(0);
+    await new Promise((r) => setTimeout(r, 1500));
+    await expect(readFile(marker, "utf8")).rejects.toThrow();
+  }, 15000);
+
   it("reports a cancelled run when the signal aborts mid-flight", async () => {
     const controller = new AbortController();
     const pending = runShellCommand("sleep 30", {
@@ -686,6 +718,84 @@ describe("runShellCommand", () => {
     const result = await pending;
     expect(result.cancelled).toBe(true);
     expect(result.exitCode).toBeUndefined();
+  });
+
+  it("resolves with spawnError instead of rejecting when spawn throws synchronously", async () => {
+    const result = await runShellCommand("echo \0hello", { cwd: process.cwd() });
+    expect(result.spawnError).toBeDefined();
+    expect(result.output).toBe("");
+    expect(result.cancelled).toBe(false);
+  });
+
+  it("SIGKILLs a SIGTERM-immune grandchild after timeout even once the shell has exited", async () => {
+    const cwd = await tempDir();
+    const pidFile = join(cwd, "bg.pid");
+    const started = Date.now();
+    const result = await runShellCommand(
+      `(node -e 'process.on("SIGTERM",()=>{}); require("fs").writeFileSync(process.argv[1], String(process.pid)); setInterval(()=>{}, 1000)' "${pidFile}" &); sleep 30`,
+      { cwd, timeoutMs: 200, killGraceMs: 400 },
+    );
+    expect(result.timedOut).toBe(true);
+    expect(Date.now() - started).toBeLessThan(4000);
+    const pid = Number((await readFile(pidFile, "utf8")).trim());
+    expect(pid).toBeGreaterThan(0);
+    let alive = true;
+    try {
+      process.kill(pid, 0);
+    } catch (err) {
+      alive = (err as NodeJS.ErrnoException).code !== "ESRCH";
+    }
+    expect(alive).toBe(false);
+  });
+
+  it("does not resolve a cancelled command while a redirected SIGTERM-immune grandchild is alive", async () => {
+    if (process.platform === "win32") return;
+    const cwd = await tempDir();
+    const pidFile = join(cwd, "bg.pid");
+    const controller = new AbortController();
+    const pending = runShellCommand(
+      `(node -e 'process.on("SIGTERM",()=>{}); require("fs").writeFileSync(process.argv[1], String(process.pid)); setInterval(()=>{},1000)' "${pidFile}" >/dev/null 2>&1 &); sleep 30`,
+      { cwd, signal: controller.signal, killGraceMs: 400 },
+    );
+    const started = Date.now();
+    while (Date.now() - started < 3000) {
+      try {
+        if ((await readFile(pidFile, "utf8")).trim().length > 0) break;
+      } catch {
+        // not written yet
+      }
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    controller.abort();
+    const result = await pending;
+    expect(result.cancelled).toBe(true);
+    const pid = Number((await readFile(pidFile, "utf8")).trim());
+    expect(pid).toBeGreaterThan(0);
+    let alive = true;
+    try {
+      process.kill(pid, 0);
+    } catch (err) {
+      alive = (err as NodeJS.ErrnoException).code !== "ESRCH";
+    }
+    expect(alive).toBe(false);
+  });
+
+  it("does not hang when a background grandchild keeps stdout open", async () => {
+    const cwd = await tempDir();
+    const pidFile = join(cwd, "bg.pid");
+    const started = Date.now();
+    const result = await runShellCommand(
+      `(node -e 'setTimeout(() => {}, 30000)' & echo $! > "${pidFile}"); echo done`,
+      { cwd },
+    );
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(result.output).toContain("done");
+    expect(result.exitCode).toBe(0);
+    try {
+      process.kill(Number((await readFile(pidFile, "utf8")).trim()), "SIGKILL");
+    } catch {
+      // already gone
+    }
   });
 });
 

@@ -298,6 +298,9 @@ interface RunEnv {
   ctx: WorkflowRunContext;
   deps: WorkflowDeps;
   signal?: AbortSignal;
+  abortRun: AbortController;
+  /** In-flight scheduler work; closed generators await this after aborting. */
+  drain: Promise<unknown>[];
   cache: Map<string, StepResult>;
   outputs: Map<string, string>;
   results: Map<string, StepResult>;
@@ -397,7 +400,6 @@ export async function* runWorkflow(
   deps: WorkflowDeps,
   signal?: AbortSignal,
 ): AsyncGenerator<WorkflowEvent> {
-  const startedAt = ctx.startedAt ?? Date.now();
   const valid = validateWorkflow(spec, deps.loopMaxIterations);
   if (!valid.ok) throw new Error(`invalid workflow '${spec.name}': ${valid.error}`);
 
@@ -411,6 +413,33 @@ export async function* runWorkflow(
   if (!bound.ok) throw new Error(`cannot resolve model bindings: ${bound.error}`);
   const runnableSpec = bound.spec;
 
+  const runAbort = new AbortController();
+  // Carry the caller's abort reason across: run outputs tell a hand-off
+  // (`RUN_HANDOFF_ABORT`) from a cancel by it.
+  const onExternalAbort = (): void => runAbort.abort(signal?.reason);
+  if (signal) {
+    if (signal.aborted) runAbort.abort(signal.reason);
+    else signal.addEventListener("abort", onExternalAbort, { once: true });
+  }
+
+  try {
+    yield* runWorkflowBody(runnableSpec, spec, ctx, deps, runAbort, bound.resolutions);
+  } finally {
+    signal?.removeEventListener("abort", onExternalAbort);
+    runAbort.abort();
+  }
+}
+
+async function* runWorkflowBody(
+  runnableSpec: WorkflowSpec,
+  spec: WorkflowSpec,
+  ctx: WorkflowRunContext,
+  deps: WorkflowDeps,
+  abortRun: AbortController,
+  bindingResolutions: StepBindingResolution[],
+): AsyncGenerator<WorkflowEvent> {
+  const signal = abortRun.signal;
+  const startedAt = ctx.startedAt ?? Date.now();
   const cache = ctx.cache ?? new Map<string, StepResult>();
   const outputs = new Map<string, string>();
   const results = new Map<string, StepResult>();
@@ -443,6 +472,8 @@ export async function* runWorkflow(
     ctx,
     deps,
     signal,
+    abortRun,
+    drain: [],
     cache,
     outputs,
     results,
@@ -459,7 +490,7 @@ export async function* runWorkflow(
     startedSteps: new Set<string>(),
     ranLive: new Set<string>(),
     pauseState: { acked: false },
-    bindingResolutions: bound.resolutions,
+    bindingResolutions,
     inFlight: new Map<string, InFlightStep>(),
     killedSteps: new Map<string, string | undefined>(),
   };
@@ -470,39 +501,44 @@ export async function* runWorkflow(
     killStep: (stepId, by) => killInFlightStep(env, stepId, by),
   });
 
-  const workflowOk = specHasLoopGates(runnableSpec)
-    ? yield* runPhasedScheduler(env)
-    : yield* runDagScheduler(env);
+  try {
+    const workflowOk = specHasLoopGates(runnableSpec)
+      ? yield* runPhasedScheduler(env)
+      : yield* runDagScheduler(env);
 
-  // Drain any control events accepted in the final scheduling window so every
-  // intervention lands in the record even when the run ends right after it.
-  yield* drainControlEvents(env);
-  deps.control?.notifyFinished();
+    // Drain any control events accepted in the final scheduling window so every
+    // intervention lands in the record even when the run ends right after it.
+    yield* drainControlEvents(env);
+    deps.control?.notifyFinished();
 
-  // `allResults` accumulates one entry per step per loop iteration (a body
-  // step that ran 3 passes has 3 entries, plus 3 intermediate "not yet
-  // converged" gate results). Downstream consumers — the CLI/web run summary,
-  // cost roll-ups — would otherwise double-count every intermediate pass. Keep
-  // only the latest result per step id (the final state of each step); earlier
-  // iterations were superseded by re-runs. Their spend was not superseded,
-  // though — every pass was billed — so it rolls into the kept result, or the
-  // run's cost summary would report only the final pass of each loop. Only
-  // spend rolls up: `durationMs` stays the final pass's, since the summary's
-  // per-step time describes the state it lists, not the loop's wall clock.
-  const finalResults = new Map<string, StepResult>();
-  for (const r of env.allResults) {
-    const earlier = finalResults.get(r.stepId);
-    finalResults.set(r.stepId, earlier ? { ...r, ...addSpend(earlier, r) } : r);
+    // `allResults` accumulates one entry per step per loop iteration (a body
+    // step that ran 3 passes has 3 entries, plus 3 intermediate "not yet
+    // converged" gate results). Downstream consumers — the CLI/web run summary,
+    // cost roll-ups — would otherwise double-count every intermediate pass. Keep
+    // only the latest result per step id (the final state of each step); earlier
+    // iterations were superseded by re-runs. Their spend was not superseded,
+    // though — every pass was billed — so it rolls into the kept result, or the
+    // run's cost summary would report only the final pass of each loop. Only
+    // spend rolls up: `durationMs` stays the final pass's, since the summary's
+    // per-step time describes the state it lists, not the loop's wall clock.
+    const finalResults = new Map<string, StepResult>();
+    for (const r of env.allResults) {
+      const earlier = finalResults.get(r.stepId);
+      finalResults.set(r.stepId, earlier ? { ...r, ...addSpend(earlier, r) } : r);
+    }
+
+    yield {
+      kind: "workflow_done",
+      ok: workflowOk && !signal?.aborted && !env.budgetState.exceeded,
+      results: [...finalResults.values()],
+      budgetExceeded: env.budgetState.exceeded,
+      outputs: await runOutputs(env, startedAt),
+      ts: Date.now(),
+    };
+  } finally {
+    abortRun.abort();
+    await Promise.allSettled(env.drain);
   }
-
-  yield {
-    kind: "workflow_done",
-    ok: workflowOk && !signal?.aborted && !env.budgetState.exceeded,
-    results: [...finalResults.values()],
-    budgetExceeded: env.budgetState.exceeded,
-    outputs: await runOutputs(env, startedAt),
-    ts: Date.now(),
-  };
 }
 
 /**
@@ -1005,9 +1041,16 @@ async function* runPhasedScheduler(env: RunEnv): AsyncGenerator<WorkflowEvent, b
       },
       signal,
     ).finally(() => channel.close());
+    env.drain.push(poolDone);
 
-    for await (const ev of channel) yield ev;
-    await poolDone;
+    let phaseCompleted = false;
+    try {
+      for await (const ev of channel) yield ev;
+      phaseCompleted = true;
+    } finally {
+      if (!phaseCompleted) env.abortRun.abort();
+      await poolDone;
+    }
 
     yield { kind: "phase_done", phaseId: phase.id, ok: phaseOk, iteration, ts: Date.now() };
 
@@ -1152,9 +1195,12 @@ async function* runDagScheduler(env: RunEnv): AsyncGenerator<WorkflowEvent, bool
   };
 
   const control = env.deps.control;
-  const driver = (async () => {
-    const inFlight = new Map<string, Promise<void>>();
+  const driveLoop = async (inFlight: Map<string, Promise<void>>): Promise<void> => {
     while (true) {
+      // Let the consumer process events already in the channel (a pause, an
+      // abort) before scanning for the next launch, so steering cannot lose a
+      // race against a DAG that finishes a wave in the same tick it started.
+      await Promise.resolve();
       // A reached cost budget stops scheduling NEW steps; in-flight steps run to
       // completion, and any still-pending steps stay pending (recorded as
       // not-run), so raising the cap and resuming replays the cache and picks up
@@ -1206,10 +1252,30 @@ async function* runDagScheduler(env: RunEnv): AsyncGenerator<WorkflowEvent, bool
       if (control && paused) waiters.push(control.waitForWake(signal));
       await Promise.race(waiters);
     }
+  };
+  const driver = (async () => {
+    const inFlight = new Map<string, Promise<void>>();
+    try {
+      await driveLoop(inFlight);
+    } catch (err) {
+      // An exceptional exit must not return while siblings still run: `drain`
+      // holds only this driver, so cancel and await every in-flight step here
+      // before the failure propagates and outer cleanup releases worktrees.
+      env.abortRun.abort();
+      await Promise.allSettled([...inFlight.values()]);
+      throw err;
+    }
   })().finally(() => channel.close());
+  env.drain.push(driver);
 
-  for await (const ev of channel) yield ev;
-  await driver;
+  let completed = false;
+  try {
+    for await (const ev of channel) yield ev;
+    completed = true;
+  } finally {
+    if (!completed) env.abortRun.abort();
+    await driver;
+  }
 
   if (signal?.aborted) workflowOk = false;
   return workflowOk;
@@ -3600,9 +3666,23 @@ async function executeCommandStep(
     results: ctx.results,
     iteration: ctx.iteration,
   };
-  const cmd = renderCmd(step.cmd, templateCtx, {
-    allowShellTemplates: step.allowShellTemplates === true,
-  });
+  let cmd: string;
+  try {
+    cmd = renderCmd(step.cmd, templateCtx, {
+      allowShellTemplates: step.allowShellTemplates === true,
+    });
+  } catch (err) {
+    // A template the renderer refuses (e.g. data inside an arithmetic context)
+    // fails this step; it must not reject the scheduler and strand siblings.
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      stepId: step.id,
+      ok: false,
+      output: message,
+      error: message,
+      durationMs: Date.now() - started,
+    };
+  }
   // Env values are templates too (prefer `$VAR` over embedding data in cmd).
   // They are NOT shell-quoted — they land in the process environment as literals.
   const renderedEnv: Record<string, string> = {};

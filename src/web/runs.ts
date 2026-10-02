@@ -933,6 +933,7 @@ export class WorkflowRunManager {
           onOutputsDeferred: (write) => {
             run.deferredOutputs = write;
           },
+          runId: run.id,
         },
       )) {
         // Mid-run detach committed: stop recording, mirroring, and emitting
@@ -978,6 +979,7 @@ export class WorkflowRunManager {
         run.error = err instanceof Error ? err.message : String(err);
       }
     } finally {
+      run.controller.abort();
       if (run.timeoutTimer) clearTimeout(run.timeoutTimer);
       run.queued = false;
       run.pendingApprovals.clear();

@@ -604,7 +604,44 @@ window.Steamtrain = (function () {
   }
 
   // ---- workflow catalog ----------------------------------------------------
+  function stripTokenQuery() {
+    try {
+      var params = new URLSearchParams(window.location.search);
+      if (!params.has("token")) return;
+      params.delete("token");
+      var next =
+        window.location.pathname +
+        (params.toString() ? "?" + params.toString() : "") +
+        window.location.hash;
+      history.replaceState({}, "", next);
+    } catch (e) {}
+  }
+
+  function consumeUrlToken() {
+    try {
+      var params = new URLSearchParams(window.location.search);
+      var token = params.get("token");
+      if (!token) return false;
+      // Drop the query first so a failed auto-login cannot loop after a later
+      // successful form login reloads the same URL.
+      stripTokenQuery();
+      api("POST", "/api/auth", { token: token }).then(function (r) {
+        if (r.status === 200 && r.body.ok) {
+          window.location.reload();
+        } else {
+          showLoginForm();
+        }
+      }).catch(function () {
+        showLoginForm();
+      });
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   function loadSessionThenCatalog() {
+    if (consumeUrlToken()) return;
     api("GET", "/api/session").then(function (r) {
       if (r.status === 401) { showLoginForm(); return; }
       if (r.status === 200 && r.body) {
@@ -1129,6 +1166,7 @@ window.Steamtrain = (function () {
     api("POST", "/api/auth", { token: token }).then(function (r) {
       if (r.status === 200 && r.body.ok) {
         if (r.body.sessionTtlMs) S.sessionTtlMs = r.body.sessionTtlMs;
+        stripTokenQuery();
         window.location.reload();
       } else {
         if (errEl) errEl.textContent = (r.body && r.body.error) || "Login failed.";

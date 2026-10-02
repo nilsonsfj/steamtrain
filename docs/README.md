@@ -18,6 +18,7 @@ Deep dives:
 - [`worktree-lifecycle.md`](worktree-lifecycle.md) — closing the worktree lifecycle: merge-step `cleanup`, repo-wide `workflow worktrees` GC, conflict recovery, and harvest actions in both UIs
 - [`cost-and-budgets.md`](cost-and-budgets.md) — cost budgets, token accounting, and cost analytics
 - [`detached-runs.md`](detached-runs.md) — detached (background) runs, the shared run queue, attach from any UI, cross-process cancel/approvals
+- [`file-locks.md`](file-locks.md) — local lock ownership, crash recovery, and manual cleanup
 - [`mid-run-steering.md`](mid-run-steering.md) — pause a live run, edit steps that haven't started (prompt/cmd/model/effort), and resume — from the TUI, web UI, or CLI
 - [`human-in-the-loop.md`](human-in-the-loop.md) — autonomy labels, `human` steps, agent clarifying questions (`canAsk`), interactive takeover, and run notifications
 - [`ci-headless.md`](ci-headless.md) — running workflows in CI: `--report json|markdown|junit`, the stable exit-code contract, and the `steamtrain/run-workflow` GitHub Action

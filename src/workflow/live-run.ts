@@ -41,6 +41,12 @@ export interface LiveRunPublisher {
    * but the run is not finished.
    */
   flush(): Promise<void>;
+  /**
+   * Stop the owner heartbeat timer without writing a terminal meta. Used at
+   * handoff so the previous owner's interval cannot keep a pid:-1 entry
+   * looking alive (or leak after the UI process exits).
+   */
+  stop(): void;
   /** Flush buffered events, then write the terminal meta. */
   finish(
     status: RunRecordStatus,
@@ -223,6 +229,12 @@ export function createLiveRunPublisher(store: LiveRunStore, runId: string): Live
       // awaiting it drains the whole mirror to disk, not just buffered events.
       await chain;
     },
+    stop() {
+      finished = true;
+      clearInterval(heartbeatTimer);
+      // Hand buffered events to the write chain instead of dropping them.
+      flush();
+    },
     async finish(status, opts = {}) {
       finished = true;
       clearInterval(heartbeatTimer);
@@ -285,10 +297,17 @@ export async function acquireRunSlot(
   // registry ~4×/s per waiter; sweep only occasionally — the alive-filter
   // inside tryPromote already keeps dead entries from blocking the queue.
   const SWEEP_EVERY = 20;
+  const HEARTBEAT_EVERY_MS = 10_000;
   let polls = 0;
+  let lastHeartbeatAt = 0;
   for (;;) {
     if (options.signal?.aborted || (await store.cancelRequested(runId))) {
       return { ok: false, reason: "canceled" };
+    }
+    const now = Date.now();
+    if (now - lastHeartbeatAt >= HEARTBEAT_EVERY_MS) {
+      lastHeartbeatAt = now;
+      await store.update(runId, { heartbeatAt: now }).catch(() => {});
     }
     if (polls % SWEEP_EVERY === 0) {
       await store.list({ sweep: true });
