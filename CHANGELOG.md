@@ -1,9 +1,12 @@
 # Changelog
 
-Notable changes, newest first. Entries under Unreleased are those since
-v0.1.0-alpha.2.
+Notable changes, newest first.
 
 ## Unreleased
+
+## 0.1.0-alpha.3 — 2026-10-02
+
+Changes since v0.1.0-alpha.2.
 
 ### Changed (may break existing setups)
 

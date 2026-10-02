@@ -37,8 +37,8 @@ Recommended readiness level:
 
 ### 1. npm polish
 
-- [ ] `CHANGELOG.md` — started, with an Unreleased section for changes since
-      v0.1.0-alpha.2; split it into a version at the first npm publish.
+- [ ] `CHANGELOG.md` — started; each alpha gets its own section, and the unreleased
+      changes sit at the top.
 - [ ] Source maps in the package and dev-toolchain audit findings — accepted for
       the alpha; revisit at first npm publish.
 
